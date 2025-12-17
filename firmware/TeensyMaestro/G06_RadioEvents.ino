@@ -1,0 +1,93 @@
+void configureRadioEvents()
+{
+  //   fRig.radio.attach_slices_event(onRadio_slices);
+  //   fRig.radio.attach_panadapters_event(onRadio_panadapters);
+  //   fRig.radio.attach_lineout_gain_event(onRadio_lineout_gain);
+  //   fRig.radio.attach_lineout_mute_event(onRadio_lineout_mute);
+  //   fRig.radio.attach_headphone_gain_event(onRadio_headphone_gain);
+  //   fRig.radio.attach_headphone_mute_event(onRadio_headphone_mute);
+  //   fRig.radio.attach_remote_on_enabled_event(onRadio_remote_on_enabled);
+  //   fRig.radio.attach_pll_done_event(onRadio_pll_done);
+  //   fRig.radio.attach_freq_error_ppb_event(onRadio_freq_error_ppb);
+  //   fRig.radio.attach_cal_freq_event(onRadio_cal_freq);
+  //   fRig.radio.attach_tnf_enabled_event(onRadio_tnf_enabled);
+  //   fRig.radio.attach_snap_tune_enabled_event(onRadio_snap_tune_enabled);
+  //   fRig.radio.attach_nickname_event(onRadio_nickname);
+  //   fRig.radio.attach_callsign_event(onRadio_callsign);
+  //   fRig.radio.attach_binaural_rx_event(onRadio_binaural_rx);
+}
+
+void onRadio_slices()
+{
+  //   debugln("onRadio_slices() event!");
+}
+
+void onRadio_panadapters()
+{
+  //   debugln("onRadio_panadapters() event!");
+}
+
+void onRadio_lineout_gain()
+{
+  //    debugln("onRadio_lineout_gain() event!");
+}
+
+void onRadio_lineout_mute()
+{
+  //   debugln("onRadio_lineout_mute() event!");
+}
+
+void onRadio_headphone_gain()
+{
+  //   debugln("onRadio_headphone_gain() event!");
+}
+
+void onRadio_headphone_mute()
+{
+  //   debugln("onRadio_lineout_gain() event!");
+}
+
+void onRadio_remote_on_enabled()
+{
+  //   debugln("onRadio_remote_on_enabled() event!");
+}
+
+void onRadio_pll_done()
+{
+  //   debugln("onRadio_pll_done() event!");
+}
+
+void onRadio_freq_error_ppb()
+{
+  //   debugln("onRadio_freq_error_ppb() event!");
+}
+
+void onRadio_cal_freq()
+{
+  //   debugln("onRadio_cal_freq() event!");
+}
+
+void onRadio_tnf_enabled()
+{
+  //   debugln("onRadio_tnf_enabled() event!");
+}
+
+void onRadio_snap_tune_enabled()
+{
+  //   debugln("onRadio_snap_tune_enabled() event!");
+}
+
+void onRadio_nickname()
+{
+  //   debugln("onRadio_nickname() event!");
+}
+
+void onRadio_callsign()
+{
+  //   debugln("onRadio_callsign() event!");
+}
+
+void onRadio_binaural_rx()
+{
+  //   debugln("onRadio_binaural_rx() event!");
+}

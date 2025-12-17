@@ -1,0 +1,56 @@
+# ============================================================
+# Git attributes for TeensyMaestro — Community Edition (CE)s
+# Maintainer: TNX QSO
+#  A non-profit community developing open-source utilities
+# Purpose: Normalize line endings, enforce UTF-8, and handle binaries
+# ============================================================
+
+# --- Normalize text files to LF in repo (CRLF on Windows checkout)
+* text=auto eol=lf
+
+# --- Enforce UTF-8 encoding for source files
+*.ino     text eol=lf working-tree-encoding=UTF-8
+*.cpp     text eol=lf working-tree-encoding=UTF-8
+*.h       text eol=lf working-tree-encoding=UTF-8
+*.c       text eol=lf working-tree-encoding=UTF-8
+*.hpp     text eol=lf working-tree-encoding=UTF-8
+*.py      text eol=lf working-tree-encoding=UTF-8
+*.md      text eol=lf working-tree-encoding=UTF-8
+*.txt     text eol=lf working-tree-encoding=UTF-8
+*.bat     text eol=crlf working-tree-encoding=UTF-8
+*.ps1     text eol=crlf working-tree-encoding=UTF-8
+*.sh      text eol=lf working-tree-encoding=UTF-8
+
+# --- Prevent line-ending normalization for binaries
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.bmp     binary
+*.gif     binary
+*.ico     binary
+*.pdf     binary
+*.zip     binary
+*.7z      binary
+*.bin     binary
+*.hex     binary
+*.exe     binary
+*.dll     binary
+*.ttf     binary
+*.otf     binary
+
+# --- Arduino-specific and Teensy binary artifacts
+*.elf     binary
+*.eep     binary
+*.map     binary
+
+# --- Optional: ensure fonts and assets stay binary
+firmware/TeensyMaestro/assets/* binary
+
+# --- Normalize documentation files
+*.json    text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.ini     text eol=lf
+
+# --- GitHub linguist hint (optional)
+*.ino linguist-language=C++

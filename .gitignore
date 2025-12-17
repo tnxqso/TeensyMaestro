@@ -1,0 +1,65 @@
+# ============================================================
+# Arduino / Teensy / PlatformIO / VS Code
+# Maintainer: TNX QSO
+# A non-profit community developing open-source utilities
+# ============================================================
+
+# --- Build artifacts
+build/
+.pio/
+*.elf
+*.hex
+*.bin
+*.o
+*.d
+*.map
+*.sym
+
+# --- IDE and editor junk
+.vscode/
+.vscode/*
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+
+# --- OS or temporary files
+~$*
+*.bak
+*.tmp
+*.log
+
+# --- Arduino build directories (Arduino IDE >= 2.x)
+**/sketch/build/
+**/sketches/build/
+**/sketches/**/build/
+
+# --- Python cache (if using scripts in tools/)
+__pycache__/
+*.pyc
+
+# --- Local dev artifacts
+*.local
+*.private
+*.old
+
+# --- PlatformIO
+platformio.ini
+.piolibdeps/
+
+# --- Firmware export packages (from Arduino IDE “Export Compiled Binary”)
+*.zip
+
+# --- Optional: ignore vendor library build debris if any
+vendor-libraries/**/build/
+vendor-libraries/**/.pio/
+
+# --- Documentation exports
+docs/**/*.pdf
+docs/**/*.docx
+docs/**/*.odt
+docs/**/*.html
+
+# ============================================================
+# End of file
+# ============================================================

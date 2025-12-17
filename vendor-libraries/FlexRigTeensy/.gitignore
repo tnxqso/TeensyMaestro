@@ -1,0 +1,22 @@
+# Arduino / Teensy / PlatformIO / VS Code
+
+# Build artifacts
+build/
+.pio/
+
+# Compiled objects
+*.elf
+*.hex
+*.bin
+*.o
+*.d
+*.map
+*.sym
+*.code-workspace
+
+# IDE and OS junk
+.vscode/
+.DS_Store
+Thumbs.db
+
+platformio.ini
