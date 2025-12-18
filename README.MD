@@ -238,11 +238,59 @@ See [`LICENSE.md`](LICENSE.md) for full details.
 
 ## 📘 Links
 
-- Original project: [Len Koppl — Teensy-Maestro-for-Flex-6000-radios](https://github.com/KD0RC/Teensy-Maestro-for-Flex-6000-radios)
-- License: [CC BY-NC-SA 3.0](https://creativecommons.org/licenses/by-nc-sa/3.0/)
-- WinKey emulation overview: `WK_README.md`
-- WinKey protocol notes: `WINKEYER_PROTOCOL_V2_EMULATION.md`
-- Changelog: [`CHANGELOG.md`](CHANGELOG.md)
+### Original Project & Documentation
+
+- **Original TeensyMaestro firmware (KD0RC)**  
+  Official upstream repository by the original author, Len Koppl.  
+  https://github.com/KD0RC/Teensy-Maestro-for-Flex-6000-radios
+
+- **TeensyMaestro User Manual (DOCX)**  
+  Original user manual covering hardware operation, menus, and usage concepts.  
+  https://github.com/KD0RC/Teensy-Maestro-for-Flex-6000-radios/raw/refs/heads/master/TeensyMaestro%20User%20Manual.docx
+
+---
+
+### Hardware Design & Schematics (v2)
+
+- **TeensyMaestro Hardware Repository**  
+  Schematics, PCB files, and hardware design sources for TeensyMaestro.  
+  https://github.com/rimuadmin/TeensyMaestro-Hardware
+
+- **TeensyMaestro Hardware Wiki**  
+  Hardware build notes, revisions, BOM details, and assembly guidance.  
+  https://github.com/rimuadmin/TeensyMaestro-Hardware/wiki
+
+---
+
+### Community & Discussion
+
+- **FlexRadio Community – TeensyMaestro Thread**  
+  Long-running discussion with user experiences, troubleshooting, and background.  
+  https://community.flexradio.com/discussion/8023866/teensymaestro/
+
+---
+
+### Kits & Commercial Hardware
+
+- **TeensyMaestro v2 Hardware Kit (G7UFO Radio Shop)**  
+  Commercially available TeensyMaestro hardware kit based on the v2 design.  
+  https://shop.g7ufo.radio/products/kit-teensy-maestro?variant=52210433687890
+
+---
+
+### Project-Specific References
+
+- **License – Creative Commons BY-NC-SA 3.0**  
+  https://creativecommons.org/licenses/by-nc-sa/3.0/
+
+- **WinKey Emulation Overview**  
+  `WK_README.md`
+
+- **WinKey Protocol Notes**  
+  `WINKEYER_PROTOCOL_V2_EMULATION.md`
+
+- **Changelog**  
+  `CHANGELOG.md`
 
 ---
 
