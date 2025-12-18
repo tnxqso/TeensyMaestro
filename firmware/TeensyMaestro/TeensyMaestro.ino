@@ -12,6 +12,9 @@
 // regardless of compilation unit.
 
 // VS Code IntelliSense: pull in the other .ino files (no effect on Arduino build)
+
+#include "tm_rig_alias.h"
+#include "tm_sketch_api.h"
 #include "tm_attr.h"
 
 #include "tm_profile_select.h"
@@ -70,6 +73,7 @@ using ace_time::TimeZone;
 #include "KickSort.h"
 #include "tm_touch.h" //Keep #include "tm_touch.h" late
 
+volatile bool g_systemReady = false;
 void arm_power_down(void); // Provided by T4_PowerButton library
 
 DMAMEM TimeZone utcTz;
@@ -1037,7 +1041,8 @@ bool muxC_found = false;
 
 File ConfigFile;
 
-DMAMEM __attribute__((aligned(32))) FlexRig fRig;
+FlexRig* g_fRig = nullptr;
+DMAMEM __attribute__((aligned(32))) uint8_t fRig_buf[sizeof(FlexRig)];
 
 // Transmit Transmit;
 
@@ -1102,7 +1107,13 @@ void power_down(const char* reason)
 /***************************** setup ***************************/
 FLASHMEM void setup()
 {
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH);
   delay(StartUpDelay);  // Let the MUX and display power settle a bit.
+  digitalWrite(LED_BUILTIN, LOW);
+
+  g_fRig = new (fRig_buf) FlexRig();
+  if (!g_fRig) { while (1) {} }  // should never happen, but prevents UB  
 
 #ifdef USE_CRASH_REPORT
   Serial.begin(BAUD_RATE);
@@ -1121,6 +1132,8 @@ FLASHMEM void setup()
     delay(10000);
   }
 #endif
+
+  for (int i=0;i<3;i++){ digitalWrite(LED_BUILTIN,HIGH); delay(150); digitalWrite(LED_BUILTIN,LOW); delay(150); }
 
   tone(STPin, 1000, 100);  // power button beep
 
@@ -1150,6 +1163,7 @@ FLASHMEM void setup()
     // Accel.priority(128);
   }
 
+  g_systemReady = true;
   debugln("Leaving Setup");
 }  // End setup
 

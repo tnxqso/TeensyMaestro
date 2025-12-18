@@ -14,9 +14,8 @@
 #include "Arduino.h"
 
 #define MACRO_INFO_LIST_SIZE 10
-extern "C" {
-	typedef void (*eventHandlerFunction)(void);
-}
+typedef void (*eventHandlerFunction)(void);
+
 
 extern "C" {
 	typedef void (*eventHandlerArrFunction)(const int senderId);

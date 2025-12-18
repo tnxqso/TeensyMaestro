@@ -9,6 +9,7 @@
 #include "Display_Colors.h"
 #include "Display_Fonts.h"
 #include "FlexRigTeensy.h"
+#include "tm_rig_alias.h"
 
 // Externals provided by TeensyMaestro.ino
 extern const byte STPin;
@@ -19,7 +20,6 @@ extern uint16_t CFG_Profile_Selector_Timeout_Ms;
 extern uint16_t CFG_Profile_Selector_Close_Delay_Ms; 
 
 bool FlexIsHeadless();
-extern FlexRig fRig;
 
 namespace ProfileSel {
 

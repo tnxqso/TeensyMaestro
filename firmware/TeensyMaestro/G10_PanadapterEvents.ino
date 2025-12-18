@@ -1,3 +1,4 @@
+#include "tm_sketch_api.h"
 void configurePanadapterEvents()
 {
   for (int i = 0; i < fRig.nMaxPanadapter; i++)

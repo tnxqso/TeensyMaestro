@@ -1,3 +1,4 @@
+#include "tm_sketch_api.h"
 #include <NativeEthernet.h>
 #include <NativeDns.h>
 

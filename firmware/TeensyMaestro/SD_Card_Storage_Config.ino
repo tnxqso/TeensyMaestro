@@ -1,3 +1,4 @@
+#include "tm_sketch_api.h"
 FLASHMEM void storage_configure()
 {
 #if 0

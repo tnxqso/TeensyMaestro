@@ -1,3 +1,4 @@
+#include "tm_sketch_api.h"
 void configureWaterfallEvents()
 {
   for (int i = 0; i < fRig.nMaxWaterfall; i++)

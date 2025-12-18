@@ -20,6 +20,7 @@
 #include <FlexRigTeensy.h>   // brings FlexRig definition
 #include <MTP_Teensy.h>
 #include "tm_wk_bridge.h"
+#include "tm_rig_alias.h"
 
 #if DEBUG_WPM
 // Track one-time and change logging
@@ -40,9 +41,6 @@ extern int TXSlice;
 extern int  CWVal;  // needed for unchanged check
 extern void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline);
 extern volatile bool g_KeyerTimingActive;
-
-// Provided in main .ino (DMAMEM FlexRig fRig;)
-extern FlexRig fRig;
 
 // Headless state helper (declared elsewhere in the sketch)
 bool FlexIsHeadless();

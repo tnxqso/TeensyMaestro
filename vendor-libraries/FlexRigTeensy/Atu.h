@@ -13,9 +13,8 @@
 #define Atu_h
 #include "Arduino.h"
 
-extern "C" {
-	typedef void (*eventHandlerFunction)(void);
-}
+typedef void (*eventHandlerFunction)(void);
+
 
 class Atu
 {

@@ -26,6 +26,104 @@ If you are not sure which hardware revision you have, assume it is **not** suppo
 
 ---
 
+## 🚀 Installing TeensyMaestro CE on your TeensyMaestro v2
+
+There are two main ways to get TeensyMaestro CE onto your **Teensy 4.1**:
+
+1. **Recommended:** Flash the latest prebuilt firmware from GitHub Releases.  
+2. **Advanced:** Build the firmware yourself and flash your own binary.
+
+For almost all users, **option 1 is strongly recommended**.
+
+### ✅ Option 1 – Use a prebuilt firmware (recommended)
+
+1. Go to the TeensyMaestro CE Releases page:  
+   `https://github.com/tnxqso/TeensyMaestro/releases`
+2. Download the **latest release** for TeensyMaestro CE (HEX file or the “compiled binary” bundle).
+3. Install the official **Teensy Loader** application from PJRC (Windows/macOS/Linux).
+4. Connect your TeensyMaestro v2 (with Teensy 4.1) to your computer via USB.
+5. In Teensy Loader:
+   - Open the downloaded `.hex` file.
+   - Press the **PROGRAM** button on the Teensy (if required).
+   - Click **Program** and wait until the flashing process finishes.
+6. Power-cycle or reset the TeensyMaestro, and the new CE firmware should start.
+
+This is the easiest and safest way to run TeensyMaestro CE.  
+If you only want to use the firmware and not modify the code, **do not bother setting up a build environment.**
+
+### 🧠 Option 2 – Build the firmware yourself (advanced)
+
+Only consider this if you are already comfortable with:
+
+- C++ development for embedded targets
+- PlatformIO, or equivalent build systems
+- Debugging toolchain and environment issues on your own
+
+The environment used and tested by the CE maintainers is roughly:
+
+- **Platform:** `teensy`
+- **Framework:** `arduino`
+- **Board:** `teensy41`
+
+From a typical PlatformIO build:
+
+- Platform: Teensy (5.0.0) → Teensy 4.1  
+  - Hardware: IMXRT1062 @ 600 MHz, 512 KB RAM, 7.75 MB Flash  
+  - Debug: jlink (external)
+
+Tooling packages:
+
+- `framework-arduinoteensy @ 1.159.0 (1.59)`
+- `tool-teensy @ 1.159.0 (1.59)`
+- `toolchain-gccarmnoneeabi-teensy @ 1.110301.0 (11.3.1)`
+
+Dependency graph (libraries typically pulled in):
+
+- AceTime @ 4.1.0  
+- T4_PowerButton @ 0.0.4+sha.71de116  
+- Adafruit MCP23017 Arduino Library @ 2.3.2  
+- KickSort @ 1.1.0  
+- FlexRigTeensy-TNXQSO @ 0.1.0  
+- AceCommon @ 1.6.2  
+- AceSorting @ 1.0.0  
+- ST7796_t3 @ 1.0.0-local  
+- SPI @ 1.0  
+- NativeEthernet  
+- FNET @ 0.1.3  
+- SD @ 2.0.0  
+- SdFat @ 2.1.2  
+- MTP_Teensy @ 1.0.0  
+- Encoder @ 1.4.4  
+- EEPROM @ 2.0  
+- Wire @ 1.0  
+- XPT2046_Touchscreen  
+- Adafruit BusIO @ 1.17.4  
+
+Typical memory usage at the time of writing (example build):
+
+- `FLASH:` code ≈ 533,912 bytes, data ≈ 182,784 bytes, headers ≈ 8,776 bytes  
+  free for files ≈ 7,400,992 bytes
+- `RAM1:` variables ≈ 73,956 bytes, code ≈ 325,096 bytes, padding ≈ 2,584 bytes  
+  free for local variables ≈ 122,652 bytes
+- `RAM2:` variables ≈ 75,168 bytes  
+  free for `malloc/new` ≈ 449,120 bytes
+
+These numbers are provided **for orientation only**; they will change as the code evolves.
+
+#### Important build-support disclaimer
+
+- Setting up a working build environment for TeensyMaestro CE is **non-trivial**.
+- The TM CE team maintainers **do not provide support** for:
+  - PlatformIO installation problems  
+  - Toolchain issues  
+  - Local library version conflicts  
+  - General “how do I build this?” questions
+
+If you are an experienced developer, this should be enough information to get going.  
+If you are not, you are much better off **sticking to the prebuilt firmware from GitHub Releases**.
+
+---
+
 ## 🌐 Key Features
 
 - **WinKeyer v2 Emulation (currently TCP-only)**  

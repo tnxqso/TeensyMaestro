@@ -32,9 +32,7 @@
 //   SpotPusher::progress(sent, total);
 
 #include <Arduino.h>
-
-// Forward-declare your rig object (defined elsewhere)
-extern FlexRig fRig;
+#include "tm_rig_alias.h"
 
 namespace SpotPusher {
 

@@ -1,23 +1,26 @@
+static void onInterlock_state_wrap() { onInterlock_state(); }
+
 void configureInterlockEvents()
 {
-  // fRig.interlock.attach_timeout_event(onInterlock_timeout);
-  // fRig.interlock.attach_acc_txreq_enable_event(onInterlock_acc_txreq_enable);
-  // fRig.interlock.attach_rca_txreq_enable_event(onInterlock_rca_txreq_enable);
-  // fRig.interlock.attach_acc_txreq_polarity_event(onInterlock_acc_txreq_polarity);
-  // fRig.interlock.attach_rca_txreq_polarity_event(onInterlock_rca_txreq_polarity);
-  // fRig.interlock.attach_tx1_enabled_event(onInterlock_tx1_enabled);
-  // fRig.interlock.attach_tx1_delay_event(onInterlock_tx1_delay);
-  // fRig.interlock.attach_tx2_enabled_event(onInterlock_tx2_enabled);
-  // fRig.interlock.attach_tx2_delay_event(onInterlock_tx2_delay);
-  // fRig.interlock.attach_tx3_enabled_event(onInterlock_tx3_enabled);
-  // fRig.interlock.attach_tx3_delay_event(onInterlock_tx3_delay);
-  // fRig.interlock.attach_acc_tx_enabled_event(onInterlock_acc_tx_enabled);
-  // fRig.interlock.attach_acc_tx_delay_event(onInterlock_acc_tx_delay);
-  // fRig.interlock.attach_tx_delay_event(onInterlock_tx_delay);
-  fRig.interlock.attach_state_event(onInterlock_state);
-  // fRig.interlock.attach_reason_event(onInterlock_reason);
-  // fRig.interlock.attach_source_event(onInterlock_source);
+  // fRig.interlock.attach_timeout_event(onInterlock_timeout_wrap);
+  // fRig.interlock.attach_acc_txreq_enable_event(onInterlock_acc_txreq_enable_wrap);
+  // fRig.interlock.attach_rca_txreq_enable_event(onInterlock_rca_txreq_enable_wrap);
+  // fRig.interlock.attach_acc_txreq_polarity_event(onInterlock_acc_txreq_polarity_wrap);
+  // fRig.interlock.attach_rca_txreq_polarity_event(onInterlock_rca_txreq_polarity_wrap);
+  // fRig.interlock.attach_tx1_enabled_event(onInterlock_tx1_enabled_wrap);
+  // fRig.interlock.attach_tx1_delay_event(onInterlock_tx1_delay_wrap);
+  // fRig.interlock.attach_tx2_enabled_event(onInterlock_tx2_enabled_wrap);
+  // fRig.interlock.attach_tx2_delay_event(onInterlock_tx2_delay_wrap);
+  // fRig.interlock.attach_tx3_enabled_event(onInterlock_tx3_enabled_wrap);
+  // fRig.interlock.attach_tx3_delay_event(onInterlock_tx3_delay_wrap);
+  // fRig.interlock.attach_acc_tx_enabled_event(onInterlock_acc_tx_enabled_wrap);
+  // fRig.interlock.attach_acc_tx_delay_event(onInterlock_acc_tx_delay_wrap);
+  // fRig.interlock.attach_tx_delay_event(onInterlock_tx_delay_wrap);
+  fRig.interlock.attach_state_event(onInterlock_state_wrap);
+  // fRig.interlock.attach_reason_event(onInterlock_reason_wrap);
+  // fRig.interlock.attach_source_event(onInterlock_source_wrap);
 }
+
 // void onInterlock_timeout() {
 // debugln("onInterlock_timeout() event!");
 // }

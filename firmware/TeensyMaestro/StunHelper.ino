@@ -13,7 +13,7 @@
   See LICENSE for full license text and NOTICE for attributions.
   Creative Commons BY-NC-SA 3.0: https://creativecommons.org/licenses/by-nc-sa/3.0/
 */
-
+#include "tm_sketch_api.h"
 #include "StunHelper.h"
 #include "tm_netutil.h"
 #include <NativeEthernet.h>

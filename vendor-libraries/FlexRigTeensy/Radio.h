@@ -18,9 +18,8 @@
 #define RADIO_MIXER_LINEOUT_GAIN 1000
 #define RADIO_MIXER_HEADPHONE_GAIN 1001
 
-extern "C" {
-	typedef void (*eventHandlerFunction)(void);
-}
+typedef void (*eventHandlerFunction)(void);
+
 
 class Radio
 {

@@ -29,9 +29,7 @@
 #define TRANSMIT_LO 3013
 #define TRANSMIT_HI 3014 
 
-extern "C" {
-	typedef void (*eventHandlerFunction)(void);
-}
+typedef void (*eventHandlerFunction)(void);
 
 
 class Transmit

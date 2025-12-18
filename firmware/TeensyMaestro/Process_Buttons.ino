@@ -1,3 +1,4 @@
+#include "tm_sketch_api.h"
 #include "tm_system_utils.h"
 
 // Returns true if the radio can be controlled (online, not standalone, not headless).
@@ -140,8 +141,11 @@ void GetIOExpanderButton()
 }
 
 
-void processIOExpanderBtn(ButtonName pressedBtn)
+void processIOExpanderBtn(int pressedBtn)
 {
+  // Convert once, keep the rest of the code type-safe.
+  ButtonName btn = (ButtonName)pressedBtn;
+
   //ResetScreenSaver();
   delay(BtnDebounce);  // Debounce time.
 
@@ -157,8 +161,9 @@ void processIOExpanderBtn(ButtonName pressedBtn)
   ButtonTime = millis();
 
   // Loop until the button is released
-  while (isButtonPressed(pressedBtn))
+  while (isButtonPressed(btn))
   {
+    if (!g_systemReady) return;
     // Service network/events while the button is held (critical for interlock)
     TM_PumpCoop();
 
@@ -172,7 +177,7 @@ void processIOExpanderBtn(ButtonName pressedBtn)
     }
 
     // If Menu Select btn was pressed
-    if ((millis() - ButtonTime) > RestartTime && !DispOnce && pressedBtn == BTN_MENU_SEL)
+    if ((millis() - ButtonTime) > RestartTime && !DispOnce && btn == BTN_MENU_SEL)
     {
       tft.fillScreen(COLOR_NAVY);
       tft.setTextColor(COLOR_YELLOW);
@@ -183,7 +188,7 @@ void processIOExpanderBtn(ButtonName pressedBtn)
     }
 
     // -------- PTT (front panel) --------
-    if (pressedBtn == BTN_PTT)
+    if (btn == BTN_PTT)
     {
       if (!fRig.connected) { return; }
 
@@ -210,7 +215,7 @@ void processIOExpanderBtn(ButtonName pressedBtn)
     }
 
     // -------- SO2R: Slice A foot pedal --------
-    if (pressedBtn == BTN_ACC_8)  // 0 PTT button pushed
+    if (btn == BTN_ACC_8)  // 0 PTT button pushed
     {
       if (!fRig.connected) { return; }
       if (fRig.interlock.state != "READY" && fRig.interlock.state != "RECEIVE") { return; }
@@ -255,7 +260,7 @@ void processIOExpanderBtn(ButtonName pressedBtn)
     }
 
     // -------- SO2R: Slice B foot pedal --------
-    if (pressedBtn == BTN_ACC_9)  // 1 PTT button pushed
+    if (btn == BTN_ACC_9)  // 1 PTT button pushed
     {
       if (!fRig.connected) { return; }
       if (fRig.interlock.state != "READY" && fRig.interlock.state != "RECEIVE") { return; }
@@ -300,7 +305,7 @@ void processIOExpanderBtn(ButtonName pressedBtn)
     }
 
     // -------- TUNE button --------
-    if (pressedBtn == BTN_TUNE)
+    if (btn == BTN_TUNE)
     {
       if (!fRig.connected) { return; }
 
@@ -325,7 +330,7 @@ void processIOExpanderBtn(ButtonName pressedBtn)
       GotBtn = false;
       return;
     }
-  } // end while(isButtonPressed(pressedBtn))
+  } // end while(isButtonPressed(btn))
 
   if (DispOnce)
   {
@@ -337,7 +342,7 @@ void processIOExpanderBtn(ButtonName pressedBtn)
   }
 
   // --- Post-processing for short/long press (unchanged) ---
-  switch (pressedBtn)
+  switch (btn)
   {
     case BTN_NONE: break;
 

@@ -34,9 +34,7 @@
 #define EQ_TX_4000HZ 7016
 #define EQ_TX_8000HZ 7017
 
-extern "C" {
-	typedef void (*eventHandlerFunction)(void);
-}
+typedef void (*eventHandlerFunction)(void);
 
 class Eq
 {

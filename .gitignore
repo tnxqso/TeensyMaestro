@@ -44,7 +44,6 @@ __pycache__/
 *.old
 
 # --- PlatformIO
-platformio.ini
 .piolibdeps/
 
 # --- Firmware export packages (from Arduino IDE “Export Compiled Binary”)

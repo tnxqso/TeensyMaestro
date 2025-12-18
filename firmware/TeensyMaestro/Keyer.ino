@@ -1,3 +1,4 @@
+#include "tm_sketch_api.h"
 #include <ctype.h>
 #include <Arduino.h>
 #include "tm_wk_proto.h"

@@ -1,3 +1,4 @@
+#include "tm_sketch_api.h"
 void configureRadioEvents()
 {
   //   fRig.radio.attach_slices_event(onRadio_slices);

@@ -1,3 +1,4 @@
+#include "tm_sketch_api.h"
 void configureEqEvents()
 {
   // fRig.eq.attach_RX_mode_event(onEq_RX_mode);

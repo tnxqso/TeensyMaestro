@@ -18,6 +18,7 @@
      runtime logic should avoid modifying configuration when InSetup is false.
    ========================================================================== */
 
+#include "tm_sketch_api.h"
 #include "tm_time.h"
 #include <AceTime.h>
 #include <zonedbx/zone_registry.h>
@@ -332,6 +333,9 @@ static bool ParseBoolYN(const String& line, bool defaultVal) {
   setParseError(keyLabel, s, "expected YES/NO/ON/OFF/1/0");
   return defaultVal;
 }
+
+static int tm_index_of_key_ci(const String &haystack, const char *key);
+static bool tm_parse_ipv4(const String &s, byte out[4]);
 
 // ----------------------------------------------------------------------------
 // ParseStringValue

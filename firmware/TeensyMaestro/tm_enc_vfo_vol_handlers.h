@@ -18,6 +18,7 @@
 
 #include "tm_project.hpp"
 #include "tm_enc_helpers.hpp"
+#include "tm_rig_alias.h"
 
 // ===== Externals provided elsewhere in the project ============================
 
@@ -62,8 +63,6 @@ extern bool              VFOaccel;
 extern bool              MenuActive;
 extern bool              AccelTimingActive[2]; // kept for compatibility
 
-// Radio / UI services
-extern FlexRig           fRig;                 // provides setFreq(), slice[], etc.
 extern void              DispFrq(int slice);
 
 extern bool CheckInBand(int slice, bool sync_ui); // no default here!
@@ -258,6 +257,7 @@ static inline void HandleVol_A() {
 
   fRig.setAudioGain(A, VolVal[A]);
   VolValSave[A] = VolVal[A];
+  DispVol(A);
 }
 
 static inline void HandleVol_B() {
@@ -273,7 +273,7 @@ static inline void HandleVol_B() {
   fRig.setAudioGain(B, VolVal[B]);
   VolValSave[B] = VolVal[B];
 
-  // Original had commented test code for sidetone via TPA2016; intentionally omitted.
+  DispVol(B);
 }
 
 // Public entry points for volume

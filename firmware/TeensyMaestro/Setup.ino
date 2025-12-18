@@ -1,3 +1,4 @@
+#include "tm_sketch_api.h"
 #include "ui_boot.h"
 #include "StunHelper.h"
 #include "tm_time.h"

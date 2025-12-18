@@ -1,3 +1,4 @@
+#include "tm_sketch_api.h"
 #include "ui_boot.h"
 #include "ClockWidget.h"
 #include "Display_Driver.h"
@@ -128,7 +129,7 @@ static inline void UI_SyncFromRig() {
 }
 
 // Narrow helper when only one slice changes.
-static inline void UI_SyncSliceFromRig(int sliceId) {
+inline void UI_SyncSliceFromRig(int sliceId) {
   if (sliceId == A || sliceId == B) {
     UIState::setSliceInUse(sliceId, fRig.slice[sliceId].in_use == 1);
   }
@@ -536,7 +537,7 @@ void DispFrq(int Slice)
 }
 
 /*********************** DispLock *********************/
-void DispLock(byte Slice)
+void DispLock(int Slice)
 {
   if (Splash || MenuActive)
   {
@@ -558,7 +559,7 @@ void DispLock(byte Slice)
 }
 
 /*********************** DispMute *********************/
-void DispMute(byte Slice)
+void DispMute(int Slice)
 {
   if (fRig.slice[Slice].in_use == 1 && !Splash && !MenuActive)
   {
@@ -576,7 +577,7 @@ void DispMute(byte Slice)
 }
 
 /*********************** DispMode *********************/
-void DispMode(byte Slice)
+void DispMode(int Slice)
 {
   if (fRig.slice[Slice].in_use == 1 && !Splash && !MenuActive)
   {
@@ -597,7 +598,7 @@ void DispMode(byte Slice)
 }
 
 /*********************** DispVol *********************/
-void DispVol(byte Slice)
+void DispVol(int Slice)
 {
   if (!Splash && !MenuActive && fRig.slice[Slice].in_use == 1)
   {
@@ -612,7 +613,7 @@ void DispVol(byte Slice)
 }
 
 /*********************** DispAGC *********************/
-void DispAGC(byte Slice)
+void DispAGC(int Slice)
 {
   if (!Splash && !MenuActive && fRig.slice[Slice].in_use == 1)
   {
@@ -636,7 +637,7 @@ void DispAGC(byte Slice)
 }
 
 /*********************** DispRIT *********************/
-void DispRIT(byte Slice)
+void DispRIT(int Slice)
 {
   if (fRig.slice[Slice].in_use == 1 && !Splash && !MenuActive)
   {
@@ -676,7 +677,7 @@ void DispRIT(byte Slice)
 }
 
 /*********************** DispXIT *********************/
-void DispXIT(byte Slice)
+void DispXIT(int Slice)
 {
   if (fRig.slice[Slice].in_use == 1 && !Splash && !MenuActive)
   {
@@ -1288,7 +1289,7 @@ void DispCWMode()
 */
 
 // ===== [TM DISPLAY KeyerOnlyScreen] BEGIN =====
-static inline void DispKeyerOnlyScreen()
+inline void DispKeyerOnlyScreen()
 {
   // Draw split lines as in connected mode
   tft.drawLine(240, 0, 240, 240, COLOR_DARKGREY);
