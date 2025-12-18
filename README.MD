@@ -284,13 +284,13 @@ See [`LICENSE.md`](LICENSE.md) for full details.
   https://creativecommons.org/licenses/by-nc-sa/3.0/
 
 - **WinKey Emulation Overview**  
-  `WK_README.md`
+  [WK_README.md](WK_README.md)
 
 - **WinKey Protocol Notes**  
-  `WINKEYER_PROTOCOL_V2_EMULATION.md`
+  [WINKEYER_PROTOCOL_V2_EMULATION.md](WINKEYER_PROTOCOL_V2_EMULATION.md)
 
 - **Changelog**  
-  `CHANGELOG.md`
+  [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
