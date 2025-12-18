@@ -213,6 +213,7 @@ public:
   uint8_t buildStatusByte() const FLASHMEM;
   void sendStatusIdleNow() FLASHMEM;
   void onTransportClosed() FLASHMEM;  // called by transport when TCP disconnects
+  void onProtoClosed() FLASHMEM;      // <00><03> admin close; transport remains open
 
 private:
   static TM_WK_Protocol* s_active;

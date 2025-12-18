@@ -45,6 +45,8 @@ FLASHMEM void TM_WK_Protocol::onAdminSetBaud(uint32_t baud)
 // Static instance pointer
 TM_WK_Protocol* TM_WK_Protocol::s_active = nullptr;
 
+static uint8_t s_lastRxByte = 0;
+
 // Optional connect/disconnect chirps
 #ifndef TM_WK_BEEP_ENABLE
 #define TM_WK_BEEP_ENABLE 1
@@ -160,6 +162,24 @@ bool TM_WK_Protocol::rxPop(uint8_t& out) {
 
 // ========== Host RX entry ==========
 void TM_WK_Protocol::onByte(uint8_t b) {
+
+  const uint8_t prev = s_lastRxByte;
+  s_lastRxByte = b;
+
+  // Failsafe EchoTest pattern: <00><04> is always EchoTest in WinKeyer v2.
+  // If we see this raw sequence, arm EchoTest immediately regardless of any
+  // internal immediate-command latch state. This makes EchoTest robust even
+  // if <00><03> (admin close) leaves the immediate state machine in a bad state.
+  if (prev == WK_CMD_HOST_OPEN && b == 0x04) {
+    _adminEchoPending = true;
+    _immCmd  = IMMCMD_NONE;
+    _immNeed = 0;
+    _immGot  = 0;
+#if WK_INFO_TRACE
+    WK_DEBUGLN(F("WK: EchoTest armed via raw pattern <00><04> (failsafe)"));
+#endif
+    return;
+  }
 
   // EchoTest: if armed, the very next byte must be echoed immediately.
   // SkookumLogger uses this during handshake.
@@ -482,14 +502,14 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
         _baselineWpm   = _k.getWpm();
         _baselineSaved = true;
 
-      } else if (p == 0x03) {    // DISCONNECT request from host
-        // Do NOT change our open/closed state here.
-        // Transport (TCP/Serial) owns real open/close; we ignore this proto-level close.
-#if WK_INFO_TRACE
-        WK_DEBUGLN(F("WK: HOST OPEN <03> ignored (transport owns close)"));
-#endif
+      } else if (p == 0x03) {    // DISCONNECT request from host (admin close)
+        // Treat <00><03> as a protocol-level close/reset.
+        //
+        // SkookumLogger disables WinKeyer by sending <00><03> while keeping the USB CDC
+        // serial transport open. If we ignore this, we can retain partially-armed parser
+        // state and stop responding to subsequent handshake probes (e.g. EchoTest <00><04><xx>).
+        onProtoClosed();
         return;
-
       } else if (p == 0x04) {    // EchoTest: next character must be echoed back
         _adminEchoPending = true;
 #if WK_INFO_TRACE
@@ -775,6 +795,74 @@ FLASHMEM void TM_WK_Protocol::sendStatusIdleNow() {
     WK_DEBUGLN(F("DBG: TX_STATUS(idle-now) 0xC0"));
 #endif
   }
+}
+
+void TM_WK_Protocol::onProtoClosed() {
+  // WinKey protocol-level CLOSE (<00><03>).
+  //
+  // Rationale:
+  // Some hosts (including SkookumLogger on macOS and DXLog over TCP) use <00><03>
+  // as a "session close" or "flush" while keeping the physical transport open.
+  // We must clear internal parser / admin state so that a subsequent handshake
+  // (e.g. EchoTest <00><04><xx>, version probes, CONNECT) works reliably, but we
+  // must NOT flap the logical host-open state or emit extra beeps/status that
+  // confuse stricter hosts.
+  //
+  // Therefore, <00><03> is treated as an internal protocol reset only:
+  //  - transport is untouched,
+  //  - _hostOpen is left as-is,
+  //  - no beeps or unsolicited bytes are sent.
+  //
+  // Hosts that truly disconnect the transport will still trigger
+  // onTransportClosed(), which performs the full "real disconnect" behavior.
+
+  // Drop any pending admin one-byte consumers.
+  _adminEchoPending      = false;
+  _adminKeyerTypePending = false;
+  _adminBaudPending      = false;
+  _adminRequestedBaud    = 0;
+
+  // Clear immediate-command latch so the next <00> starts clean.
+  _immCmd  = IMMCMD_NONE;
+  _immNeed = 0;
+  _immGot  = 0;
+
+  // Discard any pending RX bytes and reset parse state so the next admin
+  // sequence / CW text starts from a known clean point.
+  _rtail                = _rhead;
+  _rxBufferedParamArmed = false;
+  _waitingOpcode        = 0;
+  _waitingSinceMs       = 0;
+  _armedSpeedValid      = false;
+  _txHoldUntilMs        = 0;
+
+  // Cancel handshake squelch / suppression timers so the next enable can probe immediately.
+  _asciiSquelch               = false;
+  _asciiSquelchUntilMs        = 0;
+  _asciiReadyBlipArmed        = false;
+  _suppressUnsolicitedUntilMs = 0;
+
+  // Abort any active keying and clear queued text so we re-enter handshake in a known-idle state.
+  _k.abortNow();
+  _k.clearTextQueue();
+
+  // Restore baseline WPM/Weight captured at CONNECT (silent, no host echo).
+  if (_baselineSaved) {
+    setWpmProvenance(_baselineWpm, WpmOrigin::BaselineRestore, F("baseline restore"));
+    recordHostSetWpm(_baselineWpm);  // suppress echo
+    _baselineSaved = false;
+  }
+  if (_baselineWeightSaved) {
+    _weight = _baselineWeight;
+    _baselineWeightSaved = false;
+#if WK_INFO_TRACE
+    WK_DEBUGF("WK: weight restored to %u (baseline)\n", (unsigned)_weight);
+#endif
+  }
+
+#if WK_INFO_TRACE
+  WK_DEBUGLN(F("WK: PROTO CLOSE (<00><03>) -> internal reset (transport open)"));
+#endif
 }
 
 void TM_WK_Protocol::onTransportClosed() {
