@@ -167,9 +167,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
   s_lastRxByte = b;
 
   // Failsafe EchoTest pattern: <00><04> is always EchoTest in WinKeyer v2.
-  // If we see this raw sequence, arm EchoTest immediately regardless of any
-  // internal immediate-command latch state. This makes EchoTest robust even
-  // if <00><03> (admin close) leaves the immediate state machine in a bad state.
   if (prev == WK_CMD_HOST_OPEN && b == 0x04) {
     _adminEchoPending = true;
     _immCmd  = IMMCMD_NONE;
@@ -182,7 +179,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
   }
 
   // EchoTest: if armed, the very next byte must be echoed immediately.
-  // SkookumLogger uses this during handshake.
   if (_adminEchoPending) {
     _adminEchoPending = false;
     if (_w) _w->writeByte(b);
@@ -192,16 +188,10 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  // ReadKeyerType: if armed by <00><0B>, consume the next byte as the parameter
-  // and reply with a single type byte. Do NOT enqueue the param into the FIFO.
+  // ReadKeyerType
   if (_adminKeyerTypePending) {
     _adminKeyerTypePending = false;
-
-    // SkookumLogger only needs *some* valid response to proceed.
-    // 0x00 is a safe default "basic keyer" type for compatibility.
     if (_w) _w->writeByte(0x00);
-
-    // Keep squelch active; some hosts immediately continue probing.
     _suppressUnsolicitedUntilMs = millis() + 1500;
     return;
   }
@@ -234,10 +224,7 @@ void TM_WK_Protocol::onByte(uint8_t b) {
       return;
     }
 
-    // Closed: ignore everything else (ASCII, buffered, other immediates)
-#if WK_ENQ_TRACE
-    WK_DEBUGF("WK: drop 0x%02X while closed\n", (unsigned)b);
-#endif
+    // Closed: ignore everything else
     return;
   }
 
@@ -260,8 +247,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
       if (_immCmd == WK_CMD_HOST_OPEN) {
         handleImmediateParam(_immBuf[0]); // admin subcommand in existing handler
       } else {
-        // For non-admin immediates, call the existing handler using the FIRST param,
-        // and use _immBuf[] directly for multi-byte commands (handled below).
         handleImmediateParam(_immBuf[0]);
       }
 
@@ -309,78 +294,28 @@ void TM_WK_Protocol::onByte(uint8_t b) {
   }
 
   if (b == WK_CMD_CLEAR_BUF) {
-    // WK2 <0A>: Host "clear buffer" / ESC.
-    //
-    // New model (2025-12-15):
-    //
-    //  • If there is *any* abortable activity (TX busy, TXQ non-empty, RX FIFO
-    //    non-empty, or parser mid-command) we treat this as a real ESC and do a
-    //    hard abort + queue flush + idle status to the host.
-    //
-    //  • If everything is genuinely idle, we treat this as a stale / spurious
-    //    ESC and ignore it completely.
-    //
-    const bool txBusy       = _k.isBusy();
-    const uint16_t txqUsed  = _k.txqUsed();
-    const uint16_t rxUsedNow = rxUsed();
-    const bool parserBusy   =
-        (_waitingOpcode != 0) ||
-        (_immNeed != _immGot) ||
-        _rxBufferedParamArmed ||
-        (_txHoldUntilMs != 0) ||
-        _armedSpeedValid;
-
-    const bool credible = txBusy ||
-                          (txqUsed > 0) ||
-                          (rxUsedNow > 0) ||
-                          parserBusy;
-
+    // WinKeyer Standard <0A>: Clear Buffer.
+    // This discards pending characters but allows current element to finish gracefully.
+    
 #if WK_INFO_TRACE
-    WK_DEBUGF(
-      "WK: CLEAR_BUFFER(<0A>) t=%lu txBusy=%u txqUsed=%u rxUsed=%u "
-      "parserBusy=%u waiting=0x%02X immNeed=%u immGot=%u "
-      "armedSpeedValid=%u holdUntil=%lu lastStatus=0x%02X\n",
-      (unsigned long)millis(),
-      (unsigned)txBusy,
-      (unsigned)txqUsed,
-      (unsigned)rxUsedNow,
-      (unsigned)parserBusy,
-      (unsigned)_waitingOpcode,
-      (unsigned)_immNeed,
-      (unsigned)_immGot,
-      (unsigned)_armedSpeedValid,
-      (unsigned long)_txHoldUntilMs,
-      (unsigned)_lastStatusSent
-    );
-    WK_DEBUGLN(credible
-      ? F("WK: CLEAR_BUFFER classified CREDIBLE (abortable activity present)")
-      : F("WK: CLEAR_BUFFER classified SPURIOUS (idle / stale)"));
+    WK_DEBUGLN(F("WK: CLEAR_BUFFER (<0A>) -> Clearing queue"));
 #endif
 
-    if (!credible) return;
-
-    // === Real, credible ESC: do a hard abort ===
-
-    // 1) Clear our unified RX FIFO so any pending host bytes are discarded.
+    // 1. Clear the RX FIFO (host side buffer)
     _rtail = _rhead;
 
-    // 2) Reset internal waiting/parse state.
+    // 2. Reset parser state
     _rxBufferedParamArmed = false;
     _waitingOpcode        = 0;
     _waitingSinceMs       = 0;
     _armedSpeedValid      = false;
     _txHoldUntilMs        = 0;
 
-    // 3) HARD abort keying immediately, then drain queued text.
-    _k.abortNow();
-    _k.clearTextQueue();
+    // 3. Tell the Keyer Interface to clear its queue.
+    _k.clearTextQueue(); 
 
-    // 4) Notify the host that we are now idle.
+    // 4. Force status update (WinKeyer spec says return status after clear)
     sendStatusIdleNow();
-
-#if WK_INFO_TRACE
-    WK_DEBUGLN(F("WK: CLEAR_BUFFER (<0A>) -> hard abort + clear RX/TX"));
-#endif
     return;
   }
 
@@ -450,7 +385,7 @@ FLASHMEM void TM_WK_Protocol::handleImmediateCommandByte(uint8_t) {
 FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
   switch (_immCmd) {
 
-    case WK_CMD_HOST_OPEN: { // <00><02>=CONNECT, <00><03>=DISCONNECT, <00><04>=EchoTest
+    case WK_CMD_HOST_OPEN: { // <00><02>=CONNECT, <00><03>=DISCONNECT
 #if WK_INFO_TRACE
       WK_DEBUGF("DBG: RX_CTL <00><%02X>  (HOST_OPEN)\n", (unsigned)p);
 #endif
@@ -472,8 +407,7 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
         _txHoldUntilMs   = 0;
         _rhead = _rtail;
 
-        // Suppress unsolicited TX during handshake to avoid confusing host probes
-        // (status edges C0/C4 and pot bytes 8x/9x must not leak here).
+        // Suppress unsolicited TX during handshake
         _suppressUnsolicitedUntilMs = millis() + 1500;
 
         // Prevent an immediate pot notification right after CONNECT.
@@ -489,59 +423,45 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
 #endif
         }
 
-        // Arm ASCII squelch and ready blip just like before.
+        // Arm ASCII squelch
         _asciiSquelch        = true;
         _lastArmLogWpm       = 0xFF;
         _asciiSquelchUntilMs = millis() + ASCII_SQUELCH_MS;
         _asciiReadyBlipArmed = true;
-
-        // You must not send “early ready pulse 0x17” during handshake if you want maximum host compatibility.
-        // sendReadyPulse();
 
         // Capture baseline WPM at the moment of CONNECT.
         _baselineWpm   = _k.getWpm();
         _baselineSaved = true;
 
       } else if (p == 0x03) {    // DISCONNECT request from host (admin close)
-        // Treat <00><03> as a protocol-level close/reset.
-        //
-        // SkookumLogger disables WinKeyer by sending <00><03> while keeping the USB CDC
-        // serial transport open. If we ignore this, we can retain partially-armed parser
-        // state and stop responding to subsequent handshake probes (e.g. EchoTest <00><04><xx>).
         onProtoClosed();
         return;
-      } else if (p == 0x04) {    // EchoTest: next character must be echoed back
+      } else if (p == 0x04) {    // EchoTest
         _adminEchoPending = true;
 #if WK_INFO_TRACE
-        WK_DEBUGLN(F("WK: HOST OPEN EchoTest armed (next byte will be echoed)"));
+        WK_DEBUGLN(F("WK: HOST OPEN EchoTest armed"));
 #endif
         return;
-      } else if (p == 0x09) {    // SkookumLogger probe: expects WinKeyer "version" >= 20
-        // SkookumLogger accepts Winkeyer version 20 or greater.
-        // Return the WK2-style revision code (e.g. 0x24), not a WK3 major version.
+      } else if (p == 0x09) {    // SkookumLogger probe
         if (_w) _w->writeByte(WK_REVISION_CODE);
         _suppressUnsolicitedUntilMs = millis() + 1500;
         return;
 
-      } else if (p == 0x0B) {    // ReadKeyerType expects a parameter byte next: <00><0B><pp>
+      } else if (p == 0x0B) {    // ReadKeyerType expects param
         _adminKeyerTypePending = true;
         _suppressUnsolicitedUntilMs = millis() + 1500;
         return;
 
-      } else if (p == 0x0A) {    // Minor version (if requested)
-        if (_w) _w->writeByte((uint8_t)(WK_REVISION_CODE & 0x0F)); // 0x04
+      } else if (p == 0x0A) {    // Minor version
+        if (_w) _w->writeByte((uint8_t)(WK_REVISION_CODE & 0x0F)); 
         _suppressUnsolicitedUntilMs = millis() + 1500;
         return;
 
       } else if (p == 0x17) {
-        // COMPAT: Some hosts (SkookumLogger observed) use <00><17> as ReadMinorVersion
-        // and expect a 1-byte reply. Our previous behavior treated this as "set low baud"
-        // and replied nothing -> host timeout.
+        // COMPAT: Some hosts use <00><17> as ReadMinorVersion
         const uint8_t minor = (uint8_t)(WK_REVISION_CODE & 0x0F);
         if (_w) _w->writeByte(minor);
 
-        // If this arrived AFTER handshake, we can also honor it as a baud request.
-        // During handshake, prioritize compatibility and just reply.
         const bool inHandshake = (_suppressUnsolicitedUntilMs &&
                                  (int32_t)(millis() - _suppressUnsolicitedUntilMs) < 0);
         if (!inHandshake) {
@@ -552,8 +472,7 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
         return;
 
       } else if (p == 0x18) {
-        // WK3 Admin: Set High Baud (9600) - but also reply a byte for robustness.
-        // Some hosts expect a response for admin queries; replying with minor is harmless.
+        // WK3 Admin: Set High Baud (9600)
         const uint8_t minor = (uint8_t)(WK_REVISION_CODE & 0x0F);
         if (_w) _w->writeByte(minor);
 
@@ -567,9 +486,8 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
         return;
 
       } else {
-
 #if WK_INFO_TRACE
-        WK_DEBUGF("WK: HOST OPEN param 0x%02X ignored (no state change)\n", (unsigned)p);
+        WK_DEBUGF("WK: HOST OPEN param 0x%02X ignored\n", (unsigned)p);
 #endif
         return;
       }
@@ -580,20 +498,14 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
 #endif
         wk_play_connect_tune(newOpen);
 
-        // Do not transmit status bytes during CONNECT; some hosts are still
-        // reading handshake replies and may misinterpret 0xC0/0xC4 as version data.
+        // Do not transmit status bytes during CONNECT
         _lastStatusSent = WK_STATUS_TAG;
       }
       return;
     }
 
     case WK_CMD_SIDETONE: { // <01><0/1>
-      // WK2: 0x01 controls sidetone enable/disable.
-      // We accept the command but do not generate any serial reply.
-      // Sidetone audio is handled elsewhere in TeensyMaestro.
-#if WK_INFO_TRACE
-      WK_DEBUGF("WK: Sidetone cmd (ignored), byte=0x%02X\n", (unsigned)p);
-#endif
+      // Sidetone handled locally
       break;
     }
 
@@ -613,30 +525,27 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       break;
     }
 
-    case WK_CMD_SET_WEIGHT: { // <03><weight> (25..75), stored only; no timing effect yet
+    case WK_CMD_SET_WEIGHT: { // <03><weight>
       uint8_t w = p;
       if (w < 25) w = 25;
       if (w > 75) w = 75;
       setWeight(w);
 #if WK_INFO_TRACE
-      WK_DEBUGF("WK: weight=%u (stored)\n", (unsigned)w);
+      WK_DEBUGF("WK: weight=%u\n", (unsigned)w);
 #endif
       break;
     }
 
     case WK_CMD_WK2_MODE: {
-      // WK2: <0E><nn> Set Winkeyer2 mode register
-      const uint8_t mode = _immBuf[0];  // same as 'p'
+      const uint8_t mode = _immBuf[0];
       _wkModeReg = mode;
 #if WK_INFO_TRACE
       WK_DEBUGF("WK: WK2 mode register=0x%02X\n", (unsigned)mode);
 #endif
-      // For now we do not alter internal keyer behavior based on this.
       break;
     }
 
     case WK_CMD_SET_PTT_DELAYS: {
-      // WK2: <04><lead><tail>
       const uint8_t lead = _immBuf[0];
       const uint8_t tail = _immBuf[1];
       _pttLeadMs = (uint16_t)lead;
@@ -647,19 +556,16 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
 
     case WK_CMD_SET_POT_LIMITS: {
       // WK2: <05><minwpm><range><unused>
-      // MINWPM sets the lowest WPM, WPMRANGE sets the window width.
       uint8_t hostMin   = _immBuf[0];
       uint8_t hostRange = _immBuf[1];
 
-      // Clamp to a sane numeric range first (WK-style 5..99 WPM window).
+      // Clamp to a sane numeric range
       if (hostMin < 5)   hostMin = 5;
       if (hostMin > 99)  hostMin = 99;
 
       if (hostRange < 1) hostRange = 1;
       if (hostRange > 99) hostRange = 99;
 
-      // Ensure we do not exceed 99 WPM at the top end.
-      // If min + range > 99, shrink the range accordingly.
       uint16_t maxWpm = (uint16_t)hostMin + (uint16_t)hostRange;
       if (maxWpm > 99) {
           hostRange = (uint8_t)(99 - hostMin);
@@ -684,23 +590,14 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
     }
 
     case WK_CMD_GET_SPEED_POT: {
-#if WK_INFO_TRACE
-      WK_DEBUGF("WK: GET_SPEED_POT (placeholder)\n");
-#endif
       break;
     }
 
     case WK_CMD_SET_OUTPUTS: {
-#if WK_INFO_TRACE
-      WK_DEBUGF("WK: outputsCfg=0x%02X (placeholder)\n", (unsigned)p);
-#endif
       break;
     }
 
     case WK_CMD_SET_COMP: {
-#if WK_INFO_TRACE
-      WK_DEBUGF("WK: keyComp=%u (placeholder)\n", (unsigned)p);
-#endif
       break;
     }
 
@@ -739,16 +636,13 @@ FLASHMEM void TM_WK_Protocol::sendStatusIdleIfPossible() {
   if (!rxEmpty()) return;
   if (_k.isBusy()) return;
 
-  // Debounce idle so we don't flap busy/idle between characters.
-  // 30 ms is enough to cover inter-character gaps on typical keyers.
+  // Debounce idle
   const uint32_t now = millis();
   if (_lastTxActivityMs && (int32_t)(now - _lastTxActivityMs) < 30) return;
 
-  // IMPORTANT: If a buffered speed (<1C><wpm>) was armed but no subsequent ASCII arrived,
-  // apply it now (at true idle) so the keyer state matches the host GUI.
+  // Apply pending speed if armed but unused
   if (_armedSpeedValid) {
     setWpmProvenance(_armedSpeedWpm, WpmOrigin::BufferedApplyIdle, F("buf <1C> @idle"));
-    // IMPORTANT: do NOT call recordHostSetWpm() for buffered speed changes.
     _armedSpeedValid = false;
 #if WK_INFO_TRACE
     WK_DEBUGF("WK: setWpm=%u [armed->applied @idle]\n", (unsigned)_armedSpeedWpm);
@@ -770,9 +664,6 @@ FLASHMEM void TM_WK_Protocol::sendStatusIdleIfPossible() {
 FLASHMEM void TM_WK_Protocol::sendReadyPulse() {
   if (_w) {
     _w->writeByte(WK_READY_PULSE);
-#if WK_INFO_TRACE
-    WK_DEBUGLN(F("WK: early ready pulse 0x17"));
-#endif
   }
 }
 
@@ -798,37 +689,16 @@ FLASHMEM void TM_WK_Protocol::sendStatusIdleNow() {
 }
 
 void TM_WK_Protocol::onProtoClosed() {
-  // WinKey protocol-level CLOSE (<00><03>).
-  //
-  // Rationale:
-  // Some hosts (including SkookumLogger on macOS and DXLog over TCP) use <00><03>
-  // as a "session close" or "flush" while keeping the physical transport open.
-  // We must clear internal parser / admin state so that a subsequent handshake
-  // (e.g. EchoTest <00><04><xx>, version probes, CONNECT) works reliably, but we
-  // must NOT flap the logical host-open state or emit extra beeps/status that
-  // confuse stricter hosts.
-  //
-  // Therefore, <00><03> is treated as an internal protocol reset only:
-  //  - transport is untouched,
-  //  - _hostOpen is left as-is,
-  //  - no beeps or unsolicited bytes are sent.
-  //
-  // Hosts that truly disconnect the transport will still trigger
-  // onTransportClosed(), which performs the full "real disconnect" behavior.
-
-  // Drop any pending admin one-byte consumers.
+  // Protocol level close (WinKeyer reset)
   _adminEchoPending      = false;
   _adminKeyerTypePending = false;
   _adminBaudPending      = false;
   _adminRequestedBaud    = 0;
 
-  // Clear immediate-command latch so the next <00> starts clean.
   _immCmd  = IMMCMD_NONE;
   _immNeed = 0;
   _immGot  = 0;
 
-  // Discard any pending RX bytes and reset parse state so the next admin
-  // sequence / CW text starts from a known clean point.
   _rtail                = _rhead;
   _rxBufferedParamArmed = false;
   _waitingOpcode        = 0;
@@ -836,17 +706,14 @@ void TM_WK_Protocol::onProtoClosed() {
   _armedSpeedValid      = false;
   _txHoldUntilMs        = 0;
 
-  // Cancel handshake squelch / suppression timers so the next enable can probe immediately.
   _asciiSquelch               = false;
   _asciiSquelchUntilMs        = 0;
   _asciiReadyBlipArmed        = false;
   _suppressUnsolicitedUntilMs = 0;
 
-  // Abort any active keying and clear queued text so we re-enter handshake in a known-idle state.
-  _k.abortNow();
   _k.clearTextQueue();
 
-  // Restore baseline WPM/Weight captured at CONNECT (silent, no host echo).
+  // Restore baseline
   if (_baselineSaved) {
     setWpmProvenance(_baselineWpm, WpmOrigin::BaselineRestore, F("baseline restore"));
     recordHostSetWpm(_baselineWpm);  // suppress echo
@@ -855,9 +722,6 @@ void TM_WK_Protocol::onProtoClosed() {
   if (_baselineWeightSaved) {
     _weight = _baselineWeight;
     _baselineWeightSaved = false;
-#if WK_INFO_TRACE
-    WK_DEBUGF("WK: weight restored to %u (baseline)\n", (unsigned)_weight);
-#endif
   }
 
 #if WK_INFO_TRACE
@@ -866,37 +730,27 @@ void TM_WK_Protocol::onProtoClosed() {
 }
 
 void TM_WK_Protocol::onTransportClosed() {
-  // Only act if we believed the host was open
+  // Transport closed (TCP disconnect)
   if (_hostOpen) {
     _hostOpen = false;
 #if WK_INFO_TRACE
     WK_DEBUGF("WK: TRANSPORT CLOSED -> DISCONNECT\n");
 #endif
-
-    // Edge-status: idle-now so host-side state machines settle gracefully
     sendStatusIdleNow();
-
-    // Audible feedback (short blip keeps it distinct from CONNECT tune)
     wk_play_connect_tune(false);
   }
 
-  // Restore baseline WPM captured at CONNECT (silent, no host echo).
   if (_baselineSaved) {
     setWpmProvenance(_baselineWpm, WpmOrigin::BaselineRestore, F("baseline restore"));
-    recordHostSetWpm(_baselineWpm);  // suppress echo
+    recordHostSetWpm(_baselineWpm);
     _baselineSaved = false;
   }
 
-  // Restore baseline Weight captured at CONNECT (stored only).
   if (_baselineWeightSaved) {
     _weight = _baselineWeight;
     _baselineWeightSaved = false;
-#if WK_INFO_TRACE
-    WK_DEBUGF("WK: weight restored to %u (baseline)\n", (unsigned)_weight);
-#endif
   }
 
-  // Clear handshake/squelch/param waits so next connect starts clean
   _asciiSquelch = false;
   _asciiSquelchUntilMs = 0;
   _waitingOpcode = 0;
@@ -917,7 +771,6 @@ FLASHMEM void TM_WK_Protocol::poll() {
   }
 
   // Observe WPM changes that did NOT originate from the protocol core.
-  // This tells us whether the front-panel/encoder actually changes _k.getWpm().
   const uint8_t cur = _k.getWpm();
   if (_lastObservedWpm == 0xFF) {
     _lastObservedWpm = cur;
@@ -926,15 +779,6 @@ FLASHMEM void TM_WK_Protocol::poll() {
     uint32_t now    = millis();
     uint32_t dtHost = now - _lastHostSetMs;
 
-#if WK_INFO_TRACE
-    WK_DEBUGF("local-change block: lastObs=%u cur=%u hostSet=%u dtHost=%lu\n",
-              (unsigned)_lastObservedWpm, (unsigned)cur,
-              (unsigned)_lastHostSetWpm,
-              (unsigned long)dtHost);
-#endif
-
-    // Treat this as host-driven only if it closely follows a host SetWPM
-    // AND the new WPM equals the last host-set WPM.
     const bool hostRecentlyDrove =
         (_lastWpmOrigin == WpmOrigin::HostImmediate) &&
         (_lastHostSetWpm == cur) &&
@@ -947,7 +791,6 @@ FLASHMEM void TM_WK_Protocol::poll() {
     const bool localChange = !(hostRecentlyDrove || macroSpeed);
 
     if (localChange) {
-      // IMPORTANT: update baseline so closing DXLog does not snap back.
       _baselineWpm   = cur;
       _baselineSaved = true;
 #if WK_INFO_TRACE
@@ -960,30 +803,20 @@ FLASHMEM void TM_WK_Protocol::poll() {
       }
     }
 
-    // After observing, reset origin marker to None so the next change is classified correctly.
     _lastObservedWpm = cur;
     _lastWpmOrigin   = WpmOrigin::None;
   }
 
-  // Defensive: drop orphaned buffered opcode if param never arrived
+  // Defensive: drop orphaned buffered opcode
   if (_waitingOpcode) {
     uint8_t head = 0;
     if (rxPeek(0, head) && head == _waitingOpcode && rxUsed() == 1) {
-      if ((int32_t)(millis() - _waitingSinceMs) > 150) { // ~150 ms grace
+      if ((int32_t)(millis() - _waitingSinceMs) > 150) { 
         uint8_t dropped = 0;
-        if (rxPop(dropped)) {
-#if WK_WARN_TRACE
-          WK_DEBUGF("WK: PARAM TIMEOUT on 0x%02X — dropped orphaned opcode\n", (unsigned)dropped);
-#endif
-        } else {
-#if WK_WARN_TRACE
-          WK_DEBUGF("WK: PARAM TIMEOUT on 0x%02X — FIFO empty, nothing to drop\n", (unsigned)head);
-#endif
-        }
+        rxPop(dropped);
         _waitingOpcode = 0;
       }
     } else {
-      // Different head or param has arrived — clear the sentinel
       _waitingOpcode = 0;
     }
   }
@@ -1006,10 +839,7 @@ FLASHMEM void TM_WK_Protocol::poll() {
     if (b0 == WK_CMD_BUF_SPEED) {
       uint8_t b1;
       if (!rxPeek(1, b1)) {
-#if WK_PEEL_TRACE
-        WK_DEBUGF("DBG: PEEL_WAIT <1C> (await param) rxUsed=%u\n", (unsigned)rxUsed());
-#endif        
-        return; // wait for parameter; do not fall into ASCII
+        return; // wait for parameter
       }
 
       uint8_t tmp; rxPop(tmp); rxPop(tmp);
@@ -1024,11 +854,6 @@ FLASHMEM void TM_WK_Protocol::poll() {
         _lastArmLogWpm = w;
       }
 #endif
-#if WK_CHUNK_TRACE
-      if (_lastArmLogWpm != w) {
-        WK_DEBUGF("DBG: ARM WPM=%u\n", (unsigned)w);
-      }
-#endif
       _lastArmLogWpm = w;
       continue;
     }
@@ -1037,22 +862,13 @@ FLASHMEM void TM_WK_Protocol::poll() {
     if (b0 == WK_CMD_BUF_PTT) {
       uint8_t b1;
       if (!rxPeek(1, b1)) {
-#if WK_PEEL_TRACE
-        WK_DEBUGF("DBG: PEEL_WAIT <18> (await param) rxUsed=%u\n", (unsigned)rxUsed());
-#endif
         return; // wait for parameter
       }
       uint8_t tmp; rxPop(tmp); rxPop(tmp);
       if (b1 & 0x01) {
         _k.startPTT();
-#if WK_PEEL_TRACE
-        WK_DEBUGF("WK: PTT ON (flags=0x%02X)\n", (unsigned)b1);
-#endif
       } else {
         _k.stopPTT();
-#if WK_PEEL_TRACE
-        WK_DEBUGF("WK: PTT OFF (flags=0x%02X)\n", (unsigned)b1);
-#endif
       }
       continue;
     }
@@ -1061,21 +877,14 @@ FLASHMEM void TM_WK_Protocol::poll() {
     if (b0 == WK_CMD_BUF_WAIT) {
       uint8_t b1;
       if (!rxPeek(1, b1)) {
-#if WK_PEEL_TRACE
-        WK_DEBUGF("DBG: PEEL_WAIT <1A> (await param) rxUsed=%u\n", (unsigned)rxUsed());
-#endif
         return; // wait for parameter
       }
       uint8_t tmp; rxPop(tmp); rxPop(tmp);
       uint32_t ms = (uint32_t)b1 * TM_WK_WAIT_UNIT_MS;
       _txHoldUntilMs = millis() + ms;
-#if WK_INFO_TRACE
-      WK_DEBUGF("WK: WAIT %u x10ms => %lu ms\n", (unsigned)b1, (unsigned long)ms);
-#endif
-      return; // hold active; end this round
+      return; // hold active
     }
 
-    // Head is not a buffered control → done peeling
     break;
   }
 
@@ -1097,9 +906,7 @@ FLASHMEM void TM_WK_Protocol::decodeAndExecute() {
 
     if (b0 == WK_CMD_BUF_SPEED) {
       uint8_t b1;
-#if WK_PEEL_TRACE
-      if (!rxPeek(1, b1)) { WK_DEBUGF("DBG: PEEL_WAIT(decode) <1C> (await param) rxUsed=%u\n", (unsigned)rxUsed()); return; }
-#endif
+      if (!rxPeek(1, b1)) return;
       uint8_t tmp;
       rxPop(tmp); rxPop(tmp);
       uint8_t w = b1;
@@ -1107,46 +914,32 @@ FLASHMEM void TM_WK_Protocol::decodeAndExecute() {
       if (w > TM_WK_WPM_MAX) w = TM_WK_WPM_MAX;
       _armedSpeedWpm   = w;
       _armedSpeedValid = true;
-#if WK_PEEL_TRACE
-      WK_DEBUGF("WK: BUF_SPEED armed=%u\n", (unsigned)w);
-      WK_DEBUGF("DBG: ARM WPM=%u\n", (unsigned)w);
-#endif
       continue;
     }
 
     if (b0 == WK_CMD_BUF_PTT) {
       uint8_t b1;
-      if (!rxPeek(1, b1)) return; // wait for param (do NOT fall through to ASCII)
+      if (!rxPeek(1, b1)) return; 
       uint8_t tmp;
       rxPop(tmp); rxPop(tmp);
       if (b1 & 0x01) {
         _k.startPTT();
-#if WK_PEEL_TRACE
-        WK_DEBUGF("WK: PTT ON (flags=0x%02X)\n", (unsigned)b1);
-#endif
       } else {
         _k.stopPTT();
-#if WK_PEEL_TRACE
-        WK_DEBUGF("WK: PTT OFF (flags=0x%02X)\n", (unsigned)b1);
-#endif
       }
       continue;
     }
 
     if (b0 == WK_CMD_BUF_WAIT) {
       uint8_t b1;
-      if (!rxPeek(1, b1)) return; // wait for param (do NOT fall through to ASCII)
+      if (!rxPeek(1, b1)) return; 
       uint8_t tmp;
       rxPop(tmp); rxPop(tmp);
       uint32_t ms = (uint32_t)b1 * TM_WK_WAIT_UNIT_MS;
       _txHoldUntilMs = millis() + ms;
-#if WK_PEEL_TRACE
-      WK_DEBUGF("WK: WAIT %u x10ms => %lu ms\n", (unsigned)b1, (unsigned long)ms);
-#endif
-      return; // stop processing this round; wait time active
+      return; 
     }
 
-    // Not a buffered control -> stop peeling
     break;
   }
 
@@ -1157,30 +950,16 @@ FLASHMEM void TM_WK_Protocol::decodeAndExecute() {
   if (!rxPeek(0, first)) return;
 
   if (!isAscii(first)) {
-    // If head is a buffered control, do NOT drop; let next round peel it.
     if (first == WK_CMD_BUF_SPEED || first == WK_CMD_BUF_PTT || first == WK_CMD_BUF_WAIT) {
-#if WK_PEEL_TRACE
-      WK_DEBUGF("DBG: ASCII_HEAD defers to PEEL (0x%02X)\n", (unsigned)first);
-#endif
       return;
     }
-    // Otherwise it's real junk → drop
+    // junk
     uint8_t junk = 0;
-    if (rxPop(junk)) {
-#if WK_WARN_TRACE      
-      WK_DEBUGF("WK: dropped non-ASCII/control 0x%02X (not buffered)\n", (unsigned)junk);
-#endif
-    } else {
-      WK_DEBUGLN(F("WK: drop attempt on empty FIFO (should not happen)"));
-    }
+    rxPop(junk);
     return;
   }
 
 
-  // ASCII head detected → mark chunk start (first byte shown)
-#if WK_CHUNK_TRACE
-  WK_DEBUGF("DBG: CHUNK_START '%c' (0x%02X)\n", (int)first, (unsigned)first);
-#endif
   // Collect contiguous ASCII
   char out[64];
   size_t n = 0;
@@ -1194,18 +973,10 @@ FLASHMEM void TM_WK_Protocol::decodeAndExecute() {
 
   if (n == 0) return;
 
-#if WK_CHUNK_TRACE
-  WK_DEBUGF("DBG: CHUNK_END n=%u\n", (unsigned)n);
-#endif
   // Apply armed speed exactly at the boundary before the first ASCII
   if (_armedSpeedValid) {
     setWpmProvenance(_armedSpeedWpm, WpmOrigin::BufferedApplyAscii, F("buf <1C> @ascii"));
-    // IMPORTANT: do NOT call recordHostSetWpm() for buffered speed changes.
     _armedSpeedValid = false;
-#if WK_CHUNK_TRACE
-    WK_DEBUGF("WK: setWpm=%u [armed->applied]\n", (unsigned)_armedSpeedWpm);
-    WK_DEBUGF("DBG: APPLY WPM=%u [armed->applied]\n", (unsigned)_armedSpeedWpm);
-#endif
   }
   // Enqueue text downstream
   (void)_k.enqueueText(out, n);
@@ -1228,14 +999,12 @@ FLASHMEM uint8_t TM_WK_Protocol::buildStatusByte() const {
   // Busy when FIFO has data or keyer is working
   if (!rxEmpty() || _k.isBusy()) s |= WK_SBIT_BUSY;
 
-  // XOFF when downstream TXQ is getting full (70%)
+  // XOFF when downstream TXQ is getting full
   uint16_t k_used = (uint16_t)_k.txqUsed();
   uint16_t k_cap  = (uint16_t)_k.txqCapacityBytes();
   if (k_cap && (k_used > (uint16_t)((k_cap * 7U) / 10U))) {
     s |= WK_SBIT_XOFF;
   }
-
-  // If your keyer exposes key-down, OR WK_SBIT_KEYDOWN here.
 
   return s;
 }

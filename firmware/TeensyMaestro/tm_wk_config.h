@@ -69,7 +69,7 @@ extern String           CFG_WK_COM_Parity;
 
 // ===== Debug switches =====
 #ifndef TM_WK_DEBUG
-#define TM_WK_DEBUG 0
+#define TM_WK_DEBUG 1
 #endif
 
 // Idle timeout for TCP Winkey connection (milliseconds). Set 0 to disable.

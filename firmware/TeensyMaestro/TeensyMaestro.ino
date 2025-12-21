@@ -13,6 +13,7 @@
 
 // VS Code IntelliSense: pull in the other .ino files (no effect on Arduino build)
 
+#include "TM_Keyer_Engine.h"
 #include "tm_rig_alias.h"
 #include "tm_sketch_api.h"
 #include "tm_attr.h"
@@ -85,6 +86,9 @@ DMAMEM TimeZone localTz;
 // set_arm_clock (528000000); // put this in the body of code to change MCU clock dynamically
 
 extern void ClockWidget_Loop();
+
+// WinKeyer specific hook needed for "C" linkage
+extern "C" void WK_OnCharEcho(uint8_t ch);
 
 #if defined(__IMXRT1062__)
   // following only as long usb_mtp is not included in cores
@@ -443,6 +447,9 @@ String ConnectSerialNum = "ANY";
 bool            CFG_WK_Enable       = true;
 TM_WK_Transport CFG_WK_Transport    = TM_WK_TRANSPORT_TCP;
 uint16_t        CFG_WK_TCP_Port     = 8891;
+
+// === NEW KEYER ENGINE ===
+TM_Keyer_Engine g_keyerEngine;
 
 // ===== Remote Command Server defaults =====
 bool            CFG_RCS_Enable      = false;
@@ -1104,6 +1111,90 @@ void power_down(const char* reason)
   while (1) { __asm__ volatile("wfi"); }
 }
 
+// Callbacks triggered by the engine
+
+// New callback to echo characters back to the host (resolves hanging)
+void Engine_CharSent_Callback(char c) {
+  // Echo the character back to the WinKeyer protocol handler.
+  // This informs DXLog/SkookumLogger that the character has been processed.
+  WK_OnCharEcho((uint8_t)c);
+}
+
+void Engine_Key_Callback(bool on) {
+  
+  // 1. Physical Keying
+  digitalWrite(KeyOutPin, on ? HIGH : LOW);
+  
+  // 2. UI Updates
+  KeyDown = on; 
+  if (on) {
+      if (!OldKeyDown) OldKeyDown = true;
+      
+      // Audio Logic
+      // Check SideTone enable AND ensure Abort isn't active
+      if (SideTone && !AbortMsg) {
+          // Use the global STFreq variable used by the rest of the system
+          // Protection against 0 Hz
+          unsigned int freq = (STFreq > 0) ? STFreq : 800; 
+          tone(STPin, freq);
+      }
+  } else {
+      if (OldKeyDown) OldKeyDown = false;
+      noTone(STPin);
+  }
+
+  // 3. FlexRadio Ethernet Keying
+  if (KeyerOut == "ETHERNET" && fRig.connected) {
+      if (on) {
+          int txSlice = -1;
+          for (int s = 0; s < fRig.nMaxSlice; ++s) {
+            if (fRig.slice[s].tx == 1 && fRig.slice[s].in_use == 1) {
+              txSlice = s;
+              break;
+            }
+          }
+          if (txSlice >= 0 && fRig.slice[txSlice].mode == "CW" && fRig.transmit.break_in == 1) {
+              char buf[128];
+              snprintf(buf, sizeof(buf), "cw key 1 time=0x%X index=%u client_handle=%s", 
+                 (unsigned)(millis() % 0xFFFF), (unsigned)CWIndex++, fRig.Client_Handle[ClientMenuItem].c_str());
+              fRig.send(buf);
+          }
+      } else {
+          char buf[128];
+          snprintf(buf, sizeof(buf), "cw key 0 time=0x%X index=%u client_handle=%s", 
+             (unsigned)(millis() % 0xFFFF), (unsigned)CWIndex++, fRig.Client_Handle[ClientMenuItem].c_str());
+          fRig.send(buf);
+      }
+  }
+}
+
+// Forward declaration needed because DoRigPTT is in Process_Buttons.ino
+extern bool DoRigPTT(bool on);
+
+void Engine_Ptt_Callback(bool on) {
+    DoRigPTT(on);
+}
+
+void Engine_Wpm_Callback(uint8_t newWpm) {
+    // 1. Update internal state variables
+    CWVal = newWpm;
+    WPM = newWpm;
+    
+    // 2. Update the Physical Encoder (Knob) position
+    // This prevents the knob from jumping back if touched later.
+    if (Encoder_9 == Enc9_CWSpeed) {
+        CWMicEnc.write(CWVal * CWEncSteps);
+    }
+
+    // 3. Refresh the Display
+    // Only redraw if the current menu/encoder selection is actually showing Speed.
+    if (Encoder_9 == Enc9_CWSpeed || Encoder_9 == Enc9_RFPower || Encoder_9 == Enc9_Band) {
+        DispCWSpeed();
+    }
+}
+
+// ==========================================================
+
 /***************************** setup ***************************/
 FLASHMEM void setup()
 {
@@ -1148,6 +1239,23 @@ FLASHMEM void setup()
   TM_RCS::begin();   // Start remote command TCP server if enabled in config
   TeensyMaestroSetup();
   KeyerSetup();
+
+  // Initialize the new non-blocking Keyer Engine
+  g_keyerEngine.begin();
+  g_keyerEngine.attachKeyCallback(Engine_Key_Callback);
+  g_keyerEngine.attachPttCallback(Engine_Ptt_Callback);
+  g_keyerEngine.attachWpmChangeCallback(Engine_Wpm_Callback);
+  g_keyerEngine.attachCharSentCallback(Engine_CharSent_Callback);
+
+  // Set initial speed from saved config
+  g_keyerEngine.setWpm((uint8_t)CWVal);
+  
+  if      (KeyMode == "A") g_keyerEngine.setMode(KeyerMode::IAMBIC_A);
+  else if (KeyMode == "B") g_keyerEngine.setMode(KeyerMode::IAMBIC_B);
+  else if (KeyMode == "U") g_keyerEngine.setMode(KeyerMode::ULTIMATIC);
+  else if (KeyMode == "S") g_keyerEngine.setMode(KeyerMode::BUG);
+  else if (KeyMode == "C") g_keyerEngine.setMode(KeyerMode::SINGLE_PADDLE);
+  else                     g_keyerEngine.setMode(KeyerMode::IAMBIC_B);
 
   // Reserve small buffers for all menu strings to reduce heap fragmentation in Debug builds
   for (int i = 0; i < 30; ++i) {
@@ -1210,46 +1318,79 @@ static void ProcessMicSelDebounce()
 /***************************** loop ***************************/
 void loop()
 {
-  
   MTP.loop();  // Allows PC to edit SD card over USB.
 
   TMTime_loop();
   ClockWidget_Loop();
 
-  KeyerLoop();
+  // --------------------------------------------------------------
+  // PADDLE INPUT LOGIC (Moved from ISR to Polling)
+  // --------------------------------------------------------------
+  // Read physical pins (Active LOW because of INPUT_PULLUP)
+  bool pinDot      = (digitalRead(DotPin) == LOW);
+  bool pinDash     = (digitalRead(DashPin) == LOW);
+  bool pinStraight = (digitalRead(StraightKeyPin) == LOW);
+
+  // --- DEBUG INPUTS ---
+  // If you do not see these lines in the Serial Monitor when pressing the paddle,
+  // there is an issue with the pin definitions or the hardware connection.
+  static bool prevDot = false;
+  static bool prevDash = false;
+  if (pinDot != prevDot) {
+      if (pinDot) Serial.println("PAD: Physical DOT Pressed");
+      else        Serial.println("PAD: Physical DOT Released");
+      prevDot = pinDot;
+  }
+  if (pinDash != prevDash) {
+      if (pinDash) Serial.println("PAD: Physical DASH Pressed");
+      else         Serial.println("PAD: Physical DASH Released");
+      prevDash = pinDash;
+  }
+  // --------------------
+
+  // Handle Handedness (Swap if left-handed)
+  // 'Handed' variable comes from global settings (0=Right, 1=Left)
+  bool logicalDot  = (Handed == 0) ? pinDot : pinDash;
+  bool logicalDash = (Handed == 0) ? pinDash : pinDot;
+
+  // Feed the Engine
+  // This allows the engine to handle Iambic timing and Break-in functionality.
+  g_keyerEngine.updatePaddles(logicalDot, logicalDash);
+  g_keyerEngine.setStraightKey(pinStraight);
+
+  // Poll the Engine (This drives the state machine forward)
+  g_keyerEngine.poll();
+  // --------------------------------------------------------------
   
   TM_WK_Bridge::poll();
   TM_RCS::poll();
   
-  ProcessMicSelDebounce();  // handle debounced MicSel outside ISR
+  ProcessMicSelDebounce();
 
   if (s_gatedLogged) ReadCWMicEnc();
 
   if (fRig.connected)
   {
     {
-      fRig.process(); // Do process() first to ingest/parse bytes from the radio,
-      fRig.fireEvents(); // then fireEvents() to dispatch handlers.
+      fRig.process(); 
+      fRig.fireEvents(); 
     }
 
     ReadAgcAEnc();
     ReadAgcBEnc();
-
-    ReadLowAEnc();  // Poll Slice A Low/Shift encoder
-    ReadLowBEnc();  // Poll Slice B Low/Shift encoder
-
-    ReadHighAEnc();  // Poll Slice A High/Shift encoder
-    ReadHighBEnc();  // Poll Slice B High/Shift encoder
+    ReadLowAEnc();  
+    ReadLowBEnc();  
+    ReadHighAEnc(); 
+    ReadHighBEnc(); 
 
     TM_VFOAccel_Process();
 
-    ReadVFOEnc(A);  // Poll Slice A VFO encoder
-    ReadVFOEnc(B);  // Poll Slice B VFO encoder
+    ReadVFOEnc(A);  
+    ReadVFOEnc(B);  
+    ReadVolAEnc();  
+    ReadVolBEnc();  
 
-    ReadVolAEnc();  // Poll Slice A volume encoder
-    ReadVolBEnc();  // Poll Slice B volume encoder
-
-    if (MicSelInt)  // Mic switch was thrown while in a non-voice mode
+    if (MicSelInt)
     {
       if (MicProfOvr)
       {
@@ -1272,42 +1413,26 @@ void loop()
   }
 
   // Scan for pressed buttons
-  if (!StraightKeyActive)
+  // Only scan buttons if not transmitting to save cycles and ensure safety
+  if (!g_keyerEngine.isTransmitting()) 
   {
     GetIOExpanderButton();
   }
 
-  if (GotTouch)  // GotTouch = true if STMPE610 controller is present
+  if (GotTouch) 
   {
     if (touch.touched())
     {
       TS_Point p = touch.getPoint();
-      // Optional: peek coordinates/pressure for debugging spurious wakeups
-      #if 0
-      Serial.print("Touch raw: x=");
-      Serial.print(p.x);
-      Serial.print(" y=");
-      Serial.print(p.y);
-      Serial.print(" z=");
-      Serial.println(p.z);
-      #endif
-
-      // Z-gate: ignore weak/ghost touches below threshold
       const int TOUCH_Z_THRESHOLD = 1600;
-      if (p.z < TOUCH_Z_THRESHOLD)
-      {
-        debugln("Touch gate: z below threshold, ignoring touch");
-        return;  // Do not wake or bump timer on weak/ghost touch
-      }
+      if (p.z < TOUCH_Z_THRESHOLD) return;
 
       if (ScreenSaveActive)
       {
-        // Wake from screensaver due to touch input
         ResetScreenSaver("Touch: wake from screensaver");
       }
       else
       {
-        // Touch while screen is already active: bump screensaver timer
         ResetScreenSaver("Touch: active screen");
         TouchDispatch();
       }
@@ -1316,7 +1441,6 @@ void loop()
 
   if (Splash && !SplashM)
   {
-    // Leaving splash screen, treat as user activity + wake if needed
     ResetScreenSaver("Splash exit");
     Splash = false;
     RefreshScreen();
@@ -1328,44 +1452,15 @@ void loop()
     {
       ScreenSaveActive = true;
       tft.fillScreen(COLOR_BLACK);
-      muxA.digitalWrite(IOX_TFT_LCD, LOW);  // NV0E
+      muxA.digitalWrite(IOX_TFT_LCD, LOW); 
     }
   }
 
   if (KeyPressed && ScreenSaveActive)
   {
     KeyPressed = false;
-    // Wake from screensaver due to keyer activity
     ResetScreenSaver("Main INO: Keyer wake from screensaver");
   }
-
-/*
-CW WPM sync – observed Flex/SmartSDR behavior and TM policy
------------------------------------------------------------
-
-1) Flex 'transmit.speed' often reports a default snapshot of 30 WPM at startup,
-   at SmartSDR disconnect, and sometimes during mode churn. It does NOT always
-   represent the user’s last CW speed. In contrast, 'cwx.wpm' reflects the real
-   persisted CW speed (e.g. 15 WPM) and typically arrives shortly after login.
-
-2) When TM starts BEFORE SmartSDR, 'transmit.speed' = 30 can arrive early and,
-   if blindly adopted, TM gets "stuck" at 30 WPM. The UI may flicker because the
-   loop re-applies this snapshot repeatedly until 'cwx.wpm' shows up.
-
-3) Slice mode churns briefly on connect (CW -> LSB -> ...). Some early slice
-   events have empty mode (“”). We must gate WPM sync on a stable CW mode.
-
-Policy:
-- Treat 'cwx.wpm' as the authoritative source for CW speed at init.
-- Never adopt 'transmit.speed' unless:
-    a) we are NOT headless,
-    b) TX slice mode is confirmed "CW",
-    c) value is sane (>0) AND != suspicious default 30, and
-    d) we've already seen at least one 'cwx.wpm' OR we are actively in CW TX.
-- Do NOT push CW speed back to radio while not in CW mode.
-- On SmartSDR disconnect or when mode is non-CW, freeze local CWVal (no adopt).
-- Debounce duplicate 'cwx.wpm' bursts (e.g. transient 5) by time or count.
-*/
 
   if (fRig.connected)
   {
@@ -1373,20 +1468,17 @@ Policy:
 
     if (GotSpeedParm) {
       GotSpeedParm = false;
-      // Force a resync now that we know a speed parameter was involved.
       TMU_SyncCwWpm(/*preserveBaseline=*/false, &applied, "loop:parm");
     } else {
-      // Normal periodic sync; harmless if nothing changes (debounced inside).
       TMU_SyncCwWpm(/*preserveBaseline=*/false, &applied, "loop");
     }
-    // 'applied' >= 0 means a change was applied
 
     if (fRig.Current_Profile != Profile)
     {
       DispProfile();
     }
 
-    if (millis() > SMeterRef + 50)  // Update S Meter every 50 ms
+    if (millis() > SMeterRef + 50) 
     {
       DispSMeter();
       SMeterRef = millis();
@@ -1407,7 +1499,6 @@ Policy:
         HighBEnc.write(HighVal[B] * HighBEncSteps);
         AGCAEnc.write(fRig.slice[A].agc_threshold * AGCAEncSteps);
         AGCBEnc.write(fRig.slice[B].agc_threshold * AGCBEncSteps);
-
 
         DispNB(Slice);
         DispNR(Slice);
@@ -1430,7 +1521,7 @@ Policy:
         fRig.connect();
         delay(500);
 
-        if (millis() - TimeIt > 5000)  // Needs time before it will connect. Keep trying for up to 5 seconds.
+        if (millis() - TimeIt > 5000) 
         {
           power_down("connect timeout >5s");
         }
@@ -1439,10 +1530,9 @@ Policy:
   }
   s_gatedLogged = true;
 
-  GotBtn   = false;  // Don't leave button rtn hung after aborting a CW msg
+  GotBtn   = false; 
   AbortMsg = false;
 
-  // ---- start spot pusher once, after setup is complete and rig is connected ----
   if (!g_SpotsStarted && fRig.connected && ShowSpots) {
     SpotPusher::start(SpotFreq, SpotText, SpotIDX);
     g_SpotsStarted = true;

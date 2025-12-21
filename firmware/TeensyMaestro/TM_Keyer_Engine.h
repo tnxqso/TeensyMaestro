@@ -20,7 +20,6 @@
 #include <Arduino.h>
 #include <stdint.h>
 
-// Max number of pending events (characters + commands) in the buffer
 #ifndef TM_KEYER_QUEUE_SIZE
 #define TM_KEYER_QUEUE_SIZE 256
 #endif
@@ -42,11 +41,20 @@ struct KeyerEvent {
   uint16_t       value; 
 };
 
-// --- Callback Signatures ---
-// We use callbacks to decouple the engine from hardware/FlexRig
-typedef void (*KeyerStateCallback)(bool active);    // For KEY OUT (High/Low)
-typedef void (*PttStateCallback)(bool active);      // For PTT OUT
-typedef void (*WpmChangeCallback)(uint8_t wpm);     // To notify UI of WPM changes from macros
+// --- Keyer Modes ---
+enum class KeyerMode : uint8_t {
+  IAMBIC_B,       // Standard squeeze with memory
+  IAMBIC_A,       // Squeeze without memory at end of element
+  ULTIMATIC,      // Last paddle pressed takes priority
+  BUG,            // Dots automatic, Dashes manual
+  SINGLE_PADDLE   // Cootie / Sideswiper (Manual)
+};
+
+// --- Callbacks ---
+typedef void (*KeyerStateCallback)(bool active);
+typedef void (*PttStateCallback)(bool active);
+typedef void (*WpmChangeCallback)(uint8_t wpm);
+typedef void (*CharSentCallback)(char c);
 
 class TM_Keyer_Engine {
 public:
@@ -72,11 +80,15 @@ public:
 
   // Immediate abort (ESC). Clears queue and stops transmission immediately.
   void abortNow();
+  void clearQueue(); // Graceful Stop (finish current element)
 
   // --- Paddle / Manual Input ---
-  // Call these from ISRs or polling loops
-  void onPaddleChange(bool dotPressed, bool dashPressed);
-  void onStraightKeyChange(bool pressed);
+  // Call this from loop() or fast timer to update paddle state
+  void updatePaddles(bool dotPressed, bool dashPressed);
+  void onStraightKeyChange(bool pressed); // Deprecated alias, keeping for compatibility if needed
+  
+  // Straight key override (bypasses timing logic usually)
+  void setStraightKey(bool pressed);
 
   // --- Configuration (Immediate) ---
   void setWpm(uint8_t wpm);
@@ -84,6 +96,7 @@ public:
   
   void setWeighting(uint8_t weight); // 50 = standard 1:1 dot:space ratio within element
   void setRatio(uint8_t ratio);      // Dit/Dah ratio (standard 3.0)
+  void setMode(KeyerMode mode);      // Set Iambic A, B, Bug, etc.
   
   void setPttLeadTail(uint16_t leadMs, uint16_t tailMs);
   void setFarnsworth(uint8_t wpm); // 0 = disabled
@@ -92,9 +105,10 @@ public:
   void attachKeyCallback(KeyerStateCallback cb) { _cbKey = cb; }
   void attachPttCallback(PttStateCallback cb)   { _cbPtt = cb; }
   void attachWpmChangeCallback(WpmChangeCallback cb) { _cbWpm = cb; }
+  void attachCharSentCallback(CharSentCallback cb)   { _cbChar = cb; }
 
   // --- Status Inspection ---
-  bool isBusy() const;        // Returns true if sending or buffer has data
+  bool isBusy() const;         // Returns true if sending or buffer has data
   bool isTransmitting() const; // Returns true only if actively keying or waiting inter-element
   uint16_t getQueueSize() const;
 
@@ -120,17 +134,29 @@ private:
   float    _ratio = 3.0f;
   uint16_t _pttLeadMs = 0;
   uint16_t _pttTailMs = 0;
+  KeyerMode _mode = KeyerMode::IAMBIC_B;
 
   // Runtime State
   uint32_t _nextEventMicros = 0; // Timestamp when next state transition occurs
   bool     _pttActive = false;
   bool     _keyActive = false;
-  bool     _inProsign = false;   // If true, gap between chars is ElementSpace (1 unit) instead of 3
+  bool     _inProsign = false;
+  bool     _straightKeyActive = false; // Tracks if straight key is currently overriding
 
   // Current Element Processing
   uint8_t  _currentMorseCode = 0; // Bitmask for current char
   uint8_t  _currentMorseLen = 0;  // Number of elements left
   
+  // Paddle Processing (Manual)
+  bool _paddleDot = false;
+  bool _paddleDash = false;
+  
+  bool _paddleMemoryDot = false;  // Dot squeezed during Dash
+  bool _paddleMemoryDash = false; // Dash squeezed during Dot
+  
+  bool _lastElementWasDot = false; // For Iambic/Alternating logic
+  bool _ultimaticPriorityDot = false; // For Ultimatic Mode (True = Dot pressed last)
+
   // Ring Buffer
   KeyerEvent _queue[TM_KEYER_QUEUE_SIZE];
   uint16_t   _head = 0;
@@ -140,11 +166,13 @@ private:
   KeyerStateCallback _cbKey = nullptr;
   PttStateCallback   _cbPtt = nullptr;
   WpmChangeCallback  _cbWpm = nullptr;
+  CharSentCallback   _cbChar = nullptr;
 
   // Internal Helpers
   void setKey(bool on);
   void setPtt(bool on);
   void processQueue();
+  void checkPaddles(); // New logic for manual keying
   void startElement(bool isDash);
   uint32_t calculateDotMicros() const;
   void lookupMorse(char c, uint8_t &code, uint8_t &len);

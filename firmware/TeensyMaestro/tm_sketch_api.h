@@ -1,3 +1,21 @@
+/*
+  tm_sketch_api.h
+
+  TeensyMaestro — Community Edition (CE)
+  SPDX-License-Identifier: CC-BY-NC-SA-3.0
+  SPDX-FileCopyrightText: 2025 TNX QSO
+
+  A community-maintained edition with open-source utilities
+  for ham radio enthusiasts, focusing on FlexRadio® and Wavelog integrations.
+
+  Based on the original TeensyMaestro by Len Koppl (KD0RC),
+  which integrates the FlexRadio 6000 library by IW7DMH.
+  Portions of this work remain © Len Koppl and © IW7DMH as noted.
+
+  See LICENSE for full license text and NOTICE for attributions.
+  Creative Commons BY-NC-SA 3.0: https://creativecommons.org/licenses/by-nc-sa/3.0/
+*/
+
 #pragma once
 #include <Arduino.h>
 
@@ -6,26 +24,43 @@ void storage_configure();
 void GetConfigFile();
 void TeensyMaestroSetup();
 
-// -------------------- Keyer API / ISRs --------------------
-void KeyerSetup();
-void KeyerLoop();
-void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline);
+// -------------------- Keyer API (Wrapper / Engine) --------------------
+// These are implemented in TM_Keyer_Wrapper.cpp (replacing Keyer.ino)
 
-// These are used as ISR callbacks (Accel.begin / attachInterrupt / timers etc)
+void KeyerSetup();
+void KeyerLoop(); // Now a stub/dummy
+void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline);
+void Keyer_Recalc_Timing();
+void Keyer_AbortNow();
+
+// Macro and Message Sending
+void SendMsg(String M);
+void SendFlexMsg(int M);
+void SendMsgRaw(const char* data, size_t len);
+
+// Legacy internal helpers (SendChar, etc.) are generally not exposed anymore
+// but kept if needed by legacy parts of the code.
+void SendChar(char c);
+
+// -------------------- ISRs --------------------
+// These are used as ISR callbacks (Accel.begin / attachInterrupt)
 void VFOAccelISR();
-void UnKeyISR();
-void StopDotTimerISR();
-void DotKeyISR();
-void DashKeyISR();
-void StraightKeyISR();
+void MicSelISR();
+
+// Legacy ISRs (Dot/Dash/Unkey) are no longer used by the new Engine
+// void UnKeyISR();
+// void StopDotTimerISR();
+// void DotKeyISR();
+// void DashKeyISR();
+// void StraightKeyISR();
 
 // -------------------- Buttons / IO expander --------------------
 void GetIOExpanderButton();
-void processIOExpanderBtn(int pressedBtn);   // adjust type if ButtonName is an enum typedef
+void processIOExpanderBtn(int pressedBtn);
 void ProcessButtons();
 
 // -------------------- Networking helpers --------------------
-void teensyMAC(uint8_t *mac);                // adjust if your signature differs
+void teensyMAC(uint8_t *mac);
 void getFixedIpAddress();
 
 // -------------------- UI / Display --------------------
@@ -69,8 +104,6 @@ void LoadClientMenu();
 FLASHMEM void LoadFilterMenu(String Mode);
 
 // -------------------- Rig event callbacks --------------------
-// These signatures may need adjustment depending on your event system.
-// If they are all `void fn(int)` then this is correct.
 void onInterlock_state(int);
 void onInterlock_state(void);
 
@@ -128,22 +161,7 @@ void onSlice_txant(int);
 void onSlice_play(int);
 void onSlice_ant_list(int);
 
-// Keyer.ino
-static inline void Keyer_HardUnkeyNow();
-static inline void _KeyerAbortAndCleanup();
-void Keyer();
-void KeyerLoop();
-void KeyerSetup();
-void KeyTrans();
-
-void SendMsgRaw(const char* p, size_t n);
-void SendChar(char c);
-void WordSpace();
-void CharSpace();
-int  ParseParm(String& s, unsigned int& idx);
-void DelayMillis(uint32_t ms);
-
-// Process_Buttons.ino handlers
+// -------------------- Process_Buttons.ino handlers --------------------
 void HandleBtnPTTBefore();
 void HandleBtnPTTAfter();
 void HandleBtnTuneBefore();

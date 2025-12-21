@@ -34,7 +34,7 @@
 #define WK_CHUNK_TRACE 0  // ASCII CHUNK_START/END + APPLY logs
 #endif
 #ifndef WK_INFO_TRACE
-#define WK_INFO_TRACE 0   // general informational "WK: ..." prints
+#define WK_INFO_TRACE 1   // general informational "WK: ..." prints
 #endif
 #ifndef WK_WARN_TRACE
 #define WK_WARN_TRACE 0   // warnings ("overflow", "timeout", junk)
