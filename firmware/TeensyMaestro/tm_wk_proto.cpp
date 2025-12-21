@@ -32,9 +32,6 @@ extern void Keyer_Beep(uint16_t freq, uint16_t ms);
 
 FLASHMEM void TM_WK_Protocol::onAdminSetBaud(uint32_t baud)
 {
-  // IMPORTANT: Do NOT call Serial.begin() here.
-  // Serial may be the WinKeyer COM transport, and changing it here would break the session.
-  // We only record the host request so the transport layer can decide what (if anything) to do.
   _adminRequestedBaud = baud;
   _adminBaudPending   = true;
 #if WK_INFO_TRACE
@@ -295,7 +292,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
 
   if (b == WK_CMD_CLEAR_BUF) {
     // WinKeyer Standard <0A>: Clear Buffer.
-    // This discards pending characters but allows current element to finish gracefully.
     
 #if WK_INFO_TRACE
     WK_DEBUGLN(F("WK: CLEAR_BUFFER (<0A>) -> Clearing queue"));
@@ -505,7 +501,6 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
     }
 
     case WK_CMD_SIDETONE: { // <01><0/1>
-      // Sidetone handled locally
       break;
     }
 
@@ -514,7 +509,7 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       if (w < TM_WK_WPM_MIN) w = TM_WK_WPM_MIN;
       if (w > TM_WK_WPM_MAX) w = TM_WK_WPM_MAX;
       setWpmProvenance(w, WpmOrigin::HostImmediate, F("host <02>"));
-      _armedSpeedValid = false;  // immediate speed overrides any pending buffered speed
+      _armedSpeedValid = false;
       recordHostSetWpm(w);
 #if WK_RX_TRACE
       WK_DEBUGF("DBG: RX_CTL <02><%02X>  (SetWPM)\n", (unsigned)p);

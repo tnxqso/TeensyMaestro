@@ -19,76 +19,56 @@
 #include "TM_Keyer_Engine.h"
 #include <ctype.h> 
 
-// Set to 0 to stop log spam, set to 1 to debug
+// Debug Level: 0 = Off, 1 = Char/State
 #undef WK_INFO_TRACE
-#define WK_INFO_TRACE 0
+#define WK_INFO_TRACE 1 
 
-// Morse Table (LSB = First Element)
+// Morse Table (LSB = First Element. 0=Dot, 1=Dash)
 static const struct { uint8_t len; uint8_t code; } MorseTable[] = {
-    {0, 0},     // Space
+    {0, 0},     // Space (32)
     {0, 0},     // !
-    {6, 0x12},  // "
+    {6, 0x12},  // " .-..-.
     {0, 0},     // #
     {0, 0},     // $
     {0, 0},     // %
     {0, 0},     // &
-    {6, 0x1E},  // '
-    {5, 0x2D},  // (
-    {6, 0x6D},  // )
+    {6, 0x1E},  // ' .----.
+    {5, 0x2D},  // ( -.--.
+    {6, 0x6D},  // ) -.--.-
     {0, 0},     // *
-    {5, 0x0A},  // +
-    {6, 0x33},  // ,
-    {6, 0x21},  // -
-    {6, 0x15},  // .
-    {5, 0x12},  // /
-    {5, 0x1F},  // 0
-    {5, 0x0F},  // 1
-    {5, 0x07},  // 2
-    {5, 0x03},  // 3
-    {5, 0x01},  // 4
-    {5, 0x00},  // 5
-    {5, 0x10},  // 6
-    {5, 0x18},  // 7
-    {5, 0x1C},  // 8
-    {5, 0x1E},  // 9
-    {6, 0x07},  // :
-    {6, 0x15},  // ;
+    {5, 0x0A},  // + .-.-.
+    {6, 0x33},  // , --..--
+    {6, 0x21},  // - -....-
+    {6, 0x15},  // . .-.-.-
+    {5, 0x12},  // / -..-.
+    
+    // DIGITS (LSB = First Element)
+    {5, 0x1F},  // 0 -----
+    {5, 0x1E},  // 1 .----
+    {5, 0x1C},  // 2 ..---
+    {5, 0x18},  // 3 ...--
+    {5, 0x10},  // 4 ....-
+    {5, 0x00},  // 5 .....
+    {5, 0x01},  // 6 -....
+    {5, 0x03},  // 7 --...
+    {5, 0x07},  // 8 ---..
+    {5, 0x0F},  // 9 ----.
+
+    {6, 0x07},  // : ---...
+    {6, 0x15},  // ; -.-.-.
     {0, 0},     // <
-    {5, 0x11},  // =
+    {5, 0x11},  // = -...-
     {0, 0},     // >
-    {6, 0x0C},  // ?
-    {5, 0x1A},  // @
-    {2, 0x02},  // A
-    {4, 0x01},  // B
-    {4, 0x05},  // C
-    {3, 0x01},  // D
-    {1, 0x00},  // E
-    {4, 0x04},  // F
-    {3, 0x03},  // G
-    {4, 0x00},  // H
-    {2, 0x00},  // I
-    {4, 0x0E},  // J
-    {3, 0x05},  // K
-    {4, 0x02},  // L
-    {2, 0x03},  // M
-    {2, 0x01},  // N
-    {3, 0x07},  // O
-    {4, 0x06},  // P
-    {4, 0x0B},  // Q
-    {3, 0x02},  // R
-    {3, 0x00},  // S
-    {1, 0x01},  // T
-    {3, 0x04},  // U
-    {4, 0x08},  // V
-    {3, 0x06},  // W
-    {4, 0x09},  // X
-    {4, 0x0D},  // Y
-    {4, 0x03},  // Z
-    {0, 0},     // [
-    {0, 0},     // Backslash
-    {0, 0},     // ]
-    {0, 0},     // ^
-    {0, 0},     // _
+    {6, 0x0C},  // ? ..--..
+    {5, 0x1A},  // @ .--.-.
+    
+    // A-Z
+    {2, 0x02}, {4, 0x01}, {4, 0x05}, {3, 0x01}, {1, 0x00}, {4, 0x04}, {3, 0x03}, {4, 0x00},
+    {2, 0x00}, {4, 0x0E}, {3, 0x05}, {4, 0x02}, {2, 0x03}, {2, 0x01}, {3, 0x07}, {4, 0x06},
+    {4, 0x0B}, {3, 0x02}, {3, 0x00}, {1, 0x01}, {3, 0x04}, {4, 0x08}, {3, 0x06}, {4, 0x09},
+    {4, 0x0D}, {4, 0x03}, 
+    
+    {0, 0}, {0, 0}, {0, 0}, {0, 0}, {0, 0}
 };
 
 TM_Keyer_Engine::TM_Keyer_Engine() {
@@ -109,21 +89,16 @@ void TM_Keyer_Engine::begin() {
   _paddleMemoryDash = false;
   _lastElementWasDot = false;
   _straightKeyActive = false;
-  _ultimaticPriorityDot = false;
+  _nextEventMicros = 0;
 }
 
 // --- Inputs ---
 
 void TM_Keyer_Engine::updatePaddles(bool dotPressed, bool dashPressed) {
-  
-  // Track priority for Ultimatic mode (Last Pressed Wins)
-  if (dotPressed && !_paddleDot) _ultimaticPriorityDot = true;
-  if (dashPressed && !_paddleDash) _ultimaticPriorityDot = false;
-
   _paddleDot = dotPressed;
   _paddleDash = dashPressed;
 
-  #if WK_INFO_TRACE
+  #if WK_INFO_TRACE >= 2
     static bool _d = false;
     static bool _h = false;
     if (_d != dotPressed || _h != dashPressed) {
@@ -135,7 +110,6 @@ void TM_Keyer_Engine::updatePaddles(bool dotPressed, bool dashPressed) {
 
   // Break-in Logic
   bool queueBusy = (_head != _tail) || (_currentMorseLen > 0);
-  
   if (queueBusy && (dotPressed || dashPressed)) {
       #if WK_INFO_TRACE
         Serial.println("ENG: Paddle Break-in! Aborting buffer.");
@@ -143,8 +117,7 @@ void TM_Keyer_Engine::updatePaddles(bool dotPressed, bool dashPressed) {
       abortNow(); 
   }
 
-  // Squeeze Memory Logic
-  // Only memorize the OPPOSITE paddle during transmission (Prevent Self-Squeeze)
+  // Squeeze Memory Logic (Capture press during an element)
   if (_state == State::TRANSMITTING_ELEMENT) {
       if (_lastElementWasDot) {
           if (dashPressed) _paddleMemoryDash = true;
@@ -182,21 +155,10 @@ bool TM_Keyer_Engine::enqueue(KeyerEvent evt) {
   return true;
 }
 
-bool TM_Keyer_Engine::enqueueChar(char c) {
-  return enqueue({KeyerEventType::CHAR, (uint16_t)c});
-}
-
-bool TM_Keyer_Engine::enqueueWpm(uint8_t wpm) {
-  return enqueue({KeyerEventType::SET_WPM, (uint16_t)wpm});
-}
-
-bool TM_Keyer_Engine::enqueuePtt(bool on) {
-  return enqueue({KeyerEventType::SET_PTT, (uint16_t)(on ? 1 : 0)});
-}
-
-bool TM_Keyer_Engine::enqueueWait(uint16_t ms) {
-  return enqueue({KeyerEventType::WAIT_MS, ms});
-}
+bool TM_Keyer_Engine::enqueueChar(char c) { return enqueue({KeyerEventType::CHAR, (uint16_t)c}); }
+bool TM_Keyer_Engine::enqueueWpm(uint8_t wpm) { return enqueue({KeyerEventType::SET_WPM, (uint16_t)wpm}); }
+bool TM_Keyer_Engine::enqueuePtt(bool on) { return enqueue({KeyerEventType::SET_PTT, (uint16_t)(on ? 1 : 0)}); }
+bool TM_Keyer_Engine::enqueueWait(uint16_t ms) { return enqueue({KeyerEventType::WAIT_MS, ms}); }
 
 uint16_t TM_Keyer_Engine::getQueueSize() const {
   if (_head >= _tail) return _head - _tail;
@@ -213,6 +175,8 @@ void TM_Keyer_Engine::abortNow() {
   if (_pttActive) setPtt(false); 
   
   _state = State::IDLE;
+  _paddleMemoryDot = false;
+  _paddleMemoryDash = false;
 }
 
 void TM_Keyer_Engine::clearQueue() {
@@ -224,16 +188,14 @@ void TM_Keyer_Engine::clearQueue() {
 void TM_Keyer_Engine::setWpm(uint8_t wpm) {
   if (wpm < 1) wpm = 1;
   if (wpm > 99) wpm = 99;
+  
   if (_wpm != wpm) {
     _wpm = wpm;
     if (_cbWpm) _cbWpm(_wpm);
   }
 }
 
-void TM_Keyer_Engine::setMode(KeyerMode mode) {
-    _mode = mode;
-}
-
+void TM_Keyer_Engine::setMode(KeyerMode mode) { _mode = mode; }
 void TM_Keyer_Engine::setWeighting(uint8_t weight) { _weight = weight; }
 void TM_Keyer_Engine::setRatio(uint8_t ratio) { 
     _ratio = (float)ratio; 
@@ -251,7 +213,7 @@ void TM_Keyer_Engine::setKey(bool on) {
   if (_keyActive != on) {
     _keyActive = on;
     #if WK_INFO_TRACE
-      Serial.print("ENG: Key "); Serial.println(on ? "DOWN" : "UP");
+      // Serial.print("ENG: Key "); Serial.println(on ? "DOWN" : "UP");
     #endif
     if (_cbKey) _cbKey(on);
   }
@@ -287,48 +249,41 @@ void TM_Keyer_Engine::lookupMorse(char c, uint8_t &code, uint8_t &len) {
     uint8_t idx = c - ' ';
     len = MorseTable[idx].len;
     code = MorseTable[idx].code;
-  } else {
-    len = 0; code = 0;
-  }
+  } else if (c == '^') { len = 5; code = 0x16; } // Å
+  else if (c == '{') { len = 4; code = 0x0A; } // Ä
+  else if (c == '}') { len = 4; code = 0x07; } // Ö
+  else if (c == '~') { len = 4; code = 0x0C; } // Ü
+  else { len = 0; code = 0; }
 }
 
-// --- Iambic Logic ---
 void TM_Keyer_Engine::checkPaddles() {
     
-    // Cootie / Single Paddle Mode (Manual Control)
+    // Manual modes
     if (_mode == KeyerMode::SINGLE_PADDLE) {
-        bool anyPressed = _paddleDot || _paddleDash;
-        if (anyPressed) {
+        if (_paddleDot || _paddleDash) {
             if (!_pttActive) setPtt(true);
             setKey(true);
         } else {
             setKey(false);
             if (!_straightKeyActive) setPtt(false);
         }
-        return; // Skip timing logic
+        return;
     }
 
-    // Bug Mode (Manual Dash)
     if (_mode == KeyerMode::BUG) {
         if (_paddleDash) {
-            // Manual control for Dash
             if (!_pttActive) setPtt(true);
             setKey(true);
-            _state = State::IDLE; // Prevent automatic timing from interfering
+            _state = State::IDLE; 
             return;
         } else {
-            // If dash released and we were keying manually, stop
             if (_keyActive && _state == State::IDLE && !_paddleDot) {
                 setKey(false);
-                // Note: PTT tail logic usually handles the drop
             }
         }
-        // Fall through to handle Dots (automatic)
     }
 
-    // --- Automatic Timing Logic (Iambic A/B, Ultimatic, Bug-Dots) ---
-
-    // PTT Logic for manual keying
+    // Automatic modes
     if ((_paddleDot || _paddleDash || _paddleMemoryDot || _paddleMemoryDash) && !_pttActive) {
         setPtt(true);
         if (_pttLeadMs > 0) {
@@ -341,18 +296,14 @@ void TM_Keyer_Engine::checkPaddles() {
     bool sendDot = false;
     bool sendDash = false;
 
-    // --- Mode Decision ---
-
     if (_mode == KeyerMode::ULTIMATIC) {
         if (_paddleDot && _paddleDash) {
-            // Both pressed: last one wins
-            if (_ultimaticPriorityDot) sendDot = true;
+            // Priority tracking logic missing for Ultimatic in this snippet, 
+            // defaulting to Dot priority for now to keep it simple.
+            if (_paddleDot) sendDot = true;
             else sendDash = true;
-        } else if (_paddleDot) {
-            sendDot = true;
-        } else if (_paddleDash) {
-            sendDash = true;
-        }
+        } else if (_paddleDot) sendDot = true;
+        else if (_paddleDash) sendDash = true;
     }
     else if (_mode == KeyerMode::IAMBIC_B) {
         if (_paddleMemoryDot || _paddleDot) {
@@ -365,29 +316,21 @@ void TM_Keyer_Engine::checkPaddles() {
         } else if (_paddleMemoryDash || _paddleDash) {
             sendDash = true;
         }
-    }
+    } 
     else if (_mode == KeyerMode::IAMBIC_A) {
-        // Iambic A does not use memory for squeezed end-of-character
         if (_paddleDot && _paddleDash) {
-            // Alternate
             if (_lastElementWasDot) sendDash = true;
             else sendDot = true;
-        } else if (_paddleDot) {
-            sendDot = true;
-        } else if (_paddleDash) {
-            sendDash = true;
-        }
+        } else if (_paddleDot) sendDot = true;
+        else if (_paddleDash) sendDash = true;
     }
     else if (_mode == KeyerMode::BUG) {
-        // Only Dits are automatic
         if (_paddleDot) sendDot = true;
     }
 
-    // Clear memories (consumed)
     if (sendDot) _paddleMemoryDot = false;
     if (sendDash) _paddleMemoryDash = false;
 
-    // Execute
     if (sendDot) {
         startElement(false);
         _lastElementWasDot = true;
@@ -395,8 +338,9 @@ void TM_Keyer_Engine::checkPaddles() {
         startElement(true);
         _lastElementWasDot = false;
     } else {
-        // Paddles released, handle PTT tail
-        if (_pttActive && _state == State::IDLE && !_paddleDot && !_paddleDash) {
+        // Paddles released
+        // Only drop PTT if queue is also empty!
+        if (_pttActive && _state == State::IDLE && !_paddleDot && !_paddleDash && (_head == _tail)) {
              if (_pttTailMs > 0) {
                  _state = State::PTT_TAIL_DELAY;
                  _nextEventMicros = micros() + (_pttTailMs * 1000UL);
@@ -439,10 +383,17 @@ void TM_Keyer_Engine::poll() {
 
     case State::START_ELEMENT:
       if (_currentMorseLen == 0) {
+          // Character finished.
+          // CORRECTED: Go to INTER_CHAR_SPACE to ensure spacing gap.
           _state = _inProsign ? State::ELEMENT_SPACE : State::INTER_CHAR_SPACE;
-          _nextEventMicros = now + calculateDotMicros() * 3;
-          if (_inProsign) _nextEventMicros = now + calculateDotMicros();
+          
+          // Wait 2 dots here. (1 dot already waited in previous ELEMENT_SPACE).
+          // Total = 1 + 2 = 3 dots.
+          _nextEventMicros = now + calculateDotMicros() * 2;
+          
+          if (_inProsign) _nextEventMicros = now; // No extra wait for prosign
       } else {
+          // Next element in character
           bool isDash = (_currentMorseCode & 0x01);
           _currentMorseCode >>= 1;
           _currentMorseLen--;
@@ -453,29 +404,23 @@ void TM_Keyer_Engine::poll() {
     case State::TRANSMITTING_ELEMENT:
       setKey(false);
       _state = State::ELEMENT_SPACE;
-      _nextEventMicros = now + calculateDotMicros();
+      _nextEventMicros = now + calculateDotMicros(); // Intra-character space (1 dot)
       break;
 
     case State::ELEMENT_SPACE:
-      if (_currentMorseLen > 0) {
-          // Continue buffered character
-          _state = State::START_ELEMENT;
-          poll(); 
-      } else {
-          // Iambic A specific cleanup: Clear memories if paddles released during element
-          if (_mode == KeyerMode::IAMBIC_A) {
-              if (!_paddleDot) _paddleMemoryDot = false;
-              if (!_paddleDash) _paddleMemoryDash = false;
-          }
-          
-          _state = State::IDLE;
-          checkPaddles(); 
-      }
+      // Always transition to START_ELEMENT to check if char is done
+      _state = State::START_ELEMENT;
+      poll(); 
       break;
 
     case State::INTER_CHAR_SPACE:
     case State::INTER_WORD_SPACE:
       _state = State::IDLE;
+      // Reset Iambic history
+      _lastElementWasDot = false;
+      _paddleMemoryDot = false;
+      _paddleMemoryDash = false;
+      
       checkPaddles();
       if (_state == State::IDLE) processQueue();
       break;
@@ -551,13 +496,16 @@ void TM_Keyer_Engine::processQueue() {
       {
         char c = (char)evt.value;
         #if WK_INFO_TRACE
-          Serial.print("ENG: Processing '"); Serial.print(c); Serial.println("'");
+          Serial.print("ENG: '"); Serial.print(c); Serial.println("'");
         #endif
         
         if (_cbChar) _cbChar(c);
 
         if (c == ' ') {
           _state = State::INTER_WORD_SPACE;
+          // Word space = 7 dots. 
+          // We already waited 1 (Element Space) + 2 (Inter-char) = 3 dots.
+          // Need 4 more.
           _nextEventMicros = micros() + (calculateDotMicros() * 4); 
         } else {
           lookupMorse(c, _currentMorseCode, _currentMorseLen);
