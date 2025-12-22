@@ -190,21 +190,23 @@ Non‑ASCII/non‑control junk is dropped with a debug trace.
 
 Supported immediate commands (command byte followed by one or more params):
 
-| Command             | Form               | Status                     | Notes |
-|---------------------|--------------------|----------------------------|-------|
-| Admin Open          | `<00><02>`         | Implemented                | Sets host‑open, sends revision 0x24 |
-| Admin Close         | `<00><03>`         | Ignored for transport      | Physical transport owns close |
-| EchoTest            | `<00><04>`         | Implemented                | Echoes next byte |
-| Minor Version / Lo Baud | `<00><17>`     | Implemented (custom)       | Replies minor nibble; outside handshake records request for 1200 baud |
-| High Baud 9600      | `<00><18>`         | Implemented (custom)       | Replies minor nibble; outside handshake records request for 9600 baud |
-| Skookum Version probe | `<00><09>`       | Implemented                | Replies 0x24 revision |
-| ReadKeyerType       | `<00><0B><pp>`     | Implemented                | Consumes param, replies `0x00` type |
-| Sidetone enable     | `<01><onOff>`      | Accepted, ignored          | Logged; no behavior change today |
-| Set WPM (immediate) | `<02><wpm>`        | Implemented                | Clamped, applied immediately |
-| Set Weight          | `<03><weight>`     | Implemented (stored only)  | Stored in `_weight`, no timing effect yet |
-| Set PTT lead/tail   | `<04><lead><tail>` | Placeholder                | Values stored, not yet applied |
-| Set Pot Limits      | `<05><min><range><unused>` | Implemented      | See section 8 |
-| WK2 Mode Register   | `<0E><mode>`       | Implemented (stored only)  | `_wkModeReg` only, no behavior change |
+| Command                | Form                        | Status                          | Notes |
+|------------------------|-----------------------------|---------------------------------|-------|
+| Admin Open/Close       | `<00><02>`, `<00><03>`      | ✔ Implemented                   | Standard behavior |
+| EchoTest               | `<00><04>`                  | ✔ Implemented                   | For picky hosts |
+| Set speed (immediate)  | `<02><wpm>`                 | ✔ Implemented                   | |
+| Set weight             | `<03><weight>`              | ✔ Implemented                   | Affects timing correctly |
+| Set PTT lead/tail      | `<04><lead><tail>`          | ✔ Implemented                   | |
+| Set pot limits         | `<05><min><range><unused>`  | ✔ Implemented                   | |
+| Get speed pot          | `<07>`                      | ✔ Implemented                   | |
+| Clear buffer (ESC)     | `<0A>`                      | ✔ Implemented (Graceful)        | Clears queue, finishes element |
+| Farnsworth             | `<0D><wpm>`                 | ✔ Implemented                   | |
+| First Extension        | `<10><ms>`                  | ✔ Implemented                   | |
+| Keying compensation    | `<11><ms>`                  | ✔ Implemented                   | |
+| Request status         | `<15>`                      | ✔ Implemented                   | |
+| Buffered PTT           | `<18><flags>`               | ✔ Implemented                   | |
+| Buffered WAIT          | `<1A><nn>`                  | ✔ Implemented                   | |
+| Buffered speed         | `<1C><wpm>`                 | ✔ Implemented                   | |
 
 Notably **not implemented as immediates** (even if case stubs exist):
 

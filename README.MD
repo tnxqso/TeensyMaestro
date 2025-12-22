@@ -126,11 +126,13 @@ If you are not, you are much better off **sticking to the prebuilt firmware from
 
 ## 🌐 Key Features
 
-- **WinKeyer v2 Emulation (currently TCP-only)**  
-  - Acts as a WinKey-compatible CW keyer over TCP.  
-  - Targeted for use with logging/contest software such as **DXLog**, **N1MM**, and others that speak the WinKey v2 protocol.  
-  - A clean-room subset implementation with documented behavior and known limitations; see  
-    `WK_README.md` and `WINKEYER_PROTOCOL_V2_EMULATION.md` for details.
+- **WinKeyer v2 Emulation**
+  - Acts as a fully-featured, K3NG/K1EL-compliant CW keyer over TCP or a virtual serial port.
+  - Features a non-blocking, poll-based architecture for precise, jitter-free timing.
+  - Supports advanced WinKeyer features like **Weighting**, **Keying Compensation**, **First Extension**, and **Farnsworth Timing**.
+  - Provides full **break-in** support, allowing paddle input to correctly interrupt and take over from macros or host transmissions.
+  - Targeted for use with logging/contest software such as **DXLog**, **N1MM**, **SkookumLogger**, and others.
+  - See `WK_README.md` and `WINKEYER_PROTOCOL_V2_EMULATION.md` for complete details.
 
 - **STUN/NAT Traversal and Fixed-IP Operation**  
   - Supports remote operation even when your TeensyMaestro is behind NAT or firewalls.  
@@ -146,26 +148,6 @@ If you are not, you are much better off **sticking to the prebuilt firmware from
 
 - **Hardware v2 Optimisations**  
   - Tuned specifically for the ST7796 display and MCP23017-based front panel found on Hardware v2.
-
----
-
-## 🧪 WinKey Emulation – What to Expect
-
-TeensyMaestro CE includes a **WinKey v2-style emulator** designed to behave like a real K1EL WinKeyer in typical contest-logging scenarios.
-
-High-level behavior:
-
-- Handshake and revision reporting compatible with standard WinKey v2 hosts.
-- ASCII text from the logger is buffered and sent as CW, with character echo back to the host.
-- Status bytes (BUSY/IDLE, flow control) are sent so the logger can track when messages start and finish.
-- ESC / Clear Buffer is implemented to abort in-progress messages under realistic operating conditions.
-
-For precise protocol details, supported commands, and which hosts we have actually tested, refer to:
-
-- `WK_README.md` – user-focused overview of the WinKey emulation.
-- `WINKEYER_PROTOCOL_V2_EMULATION.md` – technical notes about the protocol subset and behavior.
-
-If your logger depends on obscure or rarely used WinKey features, **you should assume they may not be implemented** unless explicitly documented.
 
 ---
 
