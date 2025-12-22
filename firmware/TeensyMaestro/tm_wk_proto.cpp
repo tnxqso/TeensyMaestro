@@ -11,14 +11,21 @@
 
 #include "tm_wk_proto.h"
 
-// EXTMEM allocation APIs (Teensy 4.1). extmem_malloc returns nullptr if PSRAM is absent.
+// EXTMEM allocation APIs (Teensy 4.1)
 extern "C" void* extmem_malloc(size_t size);
 extern "C" void  extmem_free(void* ptr);
 
-// C hook: keyer calls this after each symbol/char so the host sees progress.
+// C hook: Echo char to host
 extern "C" void WK_OnCharEcho(uint8_t ch) {
   if (TM_WK_Protocol::active()) {
     TM_WK_Protocol::active()->onKeyerCharEcho(ch);
+  }
+}
+
+// C Hook: Paddle Activity (Break-in)
+extern "C" void WK_OnPaddleActivity(bool active) {
+  if (TM_WK_Protocol::active()) {
+    TM_WK_Protocol::active()->onPaddleActivity(active);
   }
 }
 
@@ -84,7 +91,6 @@ TM_WK_Protocol::~TM_WK_Protocol() {
 TM_WK_Protocol::TM_WK_Protocol(TM_IKeyer& keyer, TM_IByteWriter& writer)
 : _k(keyer), _w(&writer), _rx(nullptr)
 {
-  // Allocate in EXTMEM (PSRAM) first if available
 #ifdef EXTMEM
   _rx = static_cast<uint8_t*>(extmem_malloc(TM_WK_RXBUF_SIZE));
   if (_rx) {
@@ -95,7 +101,6 @@ TM_WK_Protocol::TM_WK_Protocol(TM_IKeyer& keyer, TM_IByteWriter& writer)
   }
 #endif
 
-  // Fallback to RAM1 if EXTMEM is unavailable or allocation failed
   if (!_rx) {
     _rx = static_cast<uint8_t*>(malloc(TM_WK_RXBUF_SIZE));
     _rx_from_extmem = false;
@@ -106,10 +111,6 @@ TM_WK_Protocol::TM_WK_Protocol(TM_IKeyer& keyer, TM_IByteWriter& writer)
 
   if (_rx) {
     memset(_rx, 0, TM_WK_RXBUF_SIZE);
-  } else {
-#if WK_WARN_TRACE
-    WK_DEBUGLN(F("WK: CRITICAL: RX buffer allocation failed!"));
-#endif
   }
 
   s_active = this;
@@ -122,7 +123,6 @@ TM_WK_Protocol* TM_WK_Protocol::active() {
   return s_active;
 }
 
-// ========== NEW FUNCTION (Matches Header) ==========
 FLASHMEM void TM_WK_Protocol::setLocalBaseline(uint8_t wpm) {
     _baselineWpm = wpm;
     _baselineSaved = true;
@@ -135,7 +135,21 @@ FLASHMEM void TM_WK_Protocol::setLocalBaseline(uint8_t wpm) {
     WK_DEBUGF("WK: Knob turned -> New Baseline=%u\n", (unsigned)wpm);
 #endif
 }
-// ==========================================================
+
+// === PADDLE ACTIVITY HANDLER ===
+FLASHMEM void TM_WK_Protocol::onPaddleActivity(bool active) {
+    if (_w) {
+        // Send a status byte immediately (usually 0xC0 or 0xC2/C1 based on buildStatusByte)
+        uint8_t s = buildStatusByte();
+        _w->writeByte(s);
+        _lastStatusSent = s; 
+        
+        #if WK_INFO_TRACE
+          Serial.print("WK: HOST <- STATUS [PADDLE]: 0x");
+          Serial.println(s, HEX);
+        #endif
+    }
+}
 
 // ========== RX FIFO primitives ==========
 bool TM_WK_Protocol::rxPush(uint8_t b) {
@@ -173,7 +187,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
   const uint8_t prev = s_lastRxByte;
   s_lastRxByte = b;
 
-  // Failsafe EchoTest pattern
   if (prev == WK_CMD_HOST_OPEN && b == 0x04) {
     _adminEchoPending = true;
     _immCmd  = IMMCMD_NONE;
@@ -185,7 +198,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  // EchoTest
   if (_adminEchoPending) {
     _adminEchoPending = false;
     if (_w) _w->writeByte(b);
@@ -195,7 +207,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  // ReadKeyerType
   if (_adminKeyerTypePending) {
     _adminKeyerTypePending = false;
     if (_w) _w->writeByte(0x00);
@@ -203,10 +214,8 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  // Silently ignore stray 0xFF bytes
   if (b == 0xFF) return;
 
-  // Gate: while host is CLOSED, accept only HOST_OPEN
   if (!_hostOpen) {
     if (b == WK_CMD_STATUS_REQ) {
       if (_w) _w->writeByte(buildStatusByte());
@@ -227,7 +236,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  // Buffered param check
   if (_rxBufferedParamArmed) {
     _rxBufferedParamArmed = false;
     rxPush(b);
@@ -237,7 +245,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  // Immediate parameter collection
   if (_immCmd != IMMCMD_NONE && _immNeed > 0) {
     _immBuf[_immGot++] = b;
     if (_immGot >= _immNeed) {
@@ -253,7 +260,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  // Arm for a buffered opcode
   if (b == 0x1C || b == 0x18 || b == 0x1A) {
     _rxBufferedParamArmed = true;
     rxPush(b);
@@ -265,7 +271,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  // Squelch ASCII during handshake
   if (_asciiSquelch && isAscii(b)) {
 #if WK_INFO_TRACE
     WK_DEBUGF("WK: squelch ASCII 0x%02X (timer)\n", (unsigned)b);
@@ -273,7 +278,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  // Immediate, zero-parameter commands
   if (b == WK_CMD_STATUS_REQ) {
     uint8_t st = buildStatusByte();
     if (_w) _w->writeByte(st);
@@ -289,8 +293,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
   }
 
   if (b == WK_CMD_CLEAR_BUF) {
-    // WinKeyer Standard <0A>: Clear Buffer.
-    
 #if WK_INFO_TRACE
     WK_DEBUGLN(F("WK: CLEAR_BUFFER (<0A>) -> Clearing queue"));
 #endif
@@ -307,7 +309,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  // Immediate commands with parameters
   if (b == WK_CMD_HOST_OPEN) {          
     _immCmd  = b;
     _immNeed = 1;
@@ -350,7 +351,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
      return;
   }
 
-  // Buffered controls and ASCII go into the unified FIFO
   rxPush(b);
 #if WK_ENQ_TRACE
   WK_DEBUGF("DBG: RX_ENQ 0x%02X\n", (unsigned)b);
@@ -364,10 +364,19 @@ FLASHMEM void TM_WK_Protocol::onKeyerCharEcho(uint8_t ch)
   const uint32_t now = millis();
   _lastHostRxMs     = now;
   _lastTxActivityMs = now;
+  
+  #if WK_RX_TRACE
+    // This allows you to see exactly when the echo happens
+    if (ch >= 0x20) {
+        WK_DEBUGF("WK: ECHO -> '%c' (0x%02X)\n", (char)ch, ch);
+    } else {
+        WK_DEBUGF("WK: ECHO -> 0x%02X\n", ch);
+    }
+  #endif
+  
   sendStatusStartIfNeeded();
 }
 
-// ========== Immediate command handling ==========
 FLASHMEM void TM_WK_Protocol::handleImmediateCommandByte(uint8_t) {
 }
 
@@ -583,9 +592,7 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
     case WK_CMD_SET_OUTPUTS: {
       break;
     }
-    
-    // WK_CMD_SET_COMP is handled above in the Pro Features section
-    
+
     default:
 #if WK_INFO_TRACE
       WK_DEBUGF("WK: IMM unknown 0x%02X param=0x%02X\n", (unsigned)_immCmd, (unsigned)p);
@@ -952,6 +959,10 @@ FLASHMEM uint8_t TM_WK_Protocol::buildStatusByte() const {
   uint8_t s = WK_STATUS_TAG;
 
   if (!rxEmpty() || _k.isBusy()) s |= WK_SBIT_BUSY;
+  
+  if (_k.isPaddlePressed()) {
+      s |= WK_SBIT_KEYDOWN;
+  }
 
   uint16_t k_used = (uint16_t)_k.txqUsed();
   uint16_t k_cap  = (uint16_t)_k.txqCapacityBytes();

@@ -41,6 +41,12 @@ extern TimeZone localTz;
 // Global (declared in tm_time.cpp / header as extern)
 extern TMTimeClockFmt CFG_ClockFmt;
 
+// --- New Keyer Globals ---
+extern int KeyerCompensation;
+extern int KeyerFirstExtension;
+extern int KeyerFarnsworth;
+extern bool KeyerAutospace;
+
 // ------ Lightweight stats carrier for one config load ------
 struct ConfigLoadStats {
   bool     sd_ok            = false;
@@ -1017,6 +1023,36 @@ void ParseInBuf()
     WPM          = CWVal;
     ElementLen   = ((1200000 / WPM));
     GotSpeedParm = true;
+    return;
+  }
+  
+  // --- New Pro Features Parsing ---
+  if (InSetup && InBufUC.indexOf("CW KEYING COMPENSATION:") >= 0) {
+    KeyerCompensation = ParseIntValue(line, "CW Keying Compensation:", KeyerCompensation, 0, 255);
+    return;
+  }
+
+  if (InSetup && InBufUC.indexOf("CW FIRST EXTENSION:") >= 0) {
+    KeyerFirstExtension = ParseIntValue(line, "CW First Extension:", KeyerFirstExtension, 0, 255);
+    return;
+  }
+
+if (InSetup && InBufUC.indexOf("CW FARNSWORTH:") >= 0) {
+    // Range 0 (Disabled) or up to 70 WPM. 
+    // We parse 0-70 first, then enforce the minimum logic below.
+    int val = ParseIntValue(line, "CW Farnsworth:", KeyerFarnsworth, 0, 70);
+    
+    // If enabled (not 0) but less than 6, clamp to minimum useful speed (6 WPM)
+    if (val > 0 && val < 6) {
+        val = 6;
+    }
+    
+    KeyerFarnsworth = val;
+    return;
+  }
+
+  if (InSetup && InBufUC.indexOf("CW AUTOSPACE:") >= 0) {
+    KeyerAutospace = ParseBoolYN(line, KeyerAutospace);
     return;
   }
 

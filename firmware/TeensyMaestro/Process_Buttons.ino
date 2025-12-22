@@ -1,5 +1,8 @@
 #include "tm_sketch_api.h"
 #include "tm_system_utils.h"
+#include "TM_Keyer_Engine.h"
+
+extern TM_Keyer_Engine g_keyerEngine;
 
 // Returns true if the radio can be controlled (online, not standalone, not headless).
 static bool RigIsControllable()
@@ -710,7 +713,16 @@ static bool DoRigTune(bool on)
     return false;
   }
 
+  // 1. Tell FlexRadio to Tune (Uses Tune Power setting)
   fRig.send(on ? "transmit tune 1" : "transmit tune 0");
+  
+  // 2. Tell Engine to Tune (Handles Local Sidetone, PTT Pin, Key Pin)
+  // Note: The Engine will trigger Engine_Key_Callback via this call.
+  // Since fRig is already handled above, the duplicate "cw key 1" 
+  // sent by the callback might be redundant but usually harmless on Flex.
+  // If it causes issues, we can filter it in the callback.
+  g_keyerEngine.setTune(on);
+
   debug(F("DoRigTune(): TUNE "));
   debugln(on ? F("ON") : F("OFF"));
   return true;

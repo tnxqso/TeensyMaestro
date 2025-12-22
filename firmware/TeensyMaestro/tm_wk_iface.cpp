@@ -7,13 +7,6 @@
 
   A community-maintained edition with open-source utilities
   for ham radio enthusiasts, focusing on FlexRadio® and Wavelog integrations.
-
-  Based on the original TeensyMaestro by Len Koppl (KD0RC),
-  which integrates the FlexRadio 6000 library by IW7DMH.
-  Portions of this work remain © Len Koppl and © IW7DMH as noted.
-
-  See LICENSE for full license text and NOTICE for attributions.
-  Creative Commons BY-NC-SA 3.0: https://creativecommons.org/licenses/by-nc-sa/3.0/
 */
 
 #include "tm_wk_iface.h"
@@ -121,9 +114,7 @@ bool TM_KeyerAdapter::isBusy() const {
 }
 
 bool TM_KeyerAdapter::isPaddlePressed() const {
-  // Direct hardware check (Engine doesn't own the pins yet, but this is fine for status)
-  // Assumes DotPin/DashPin are accessible here or externed
-  return false; // Not strictly needed for WinKeyer protocol flow control
+  return g_keyerEngine.isPaddleActive();
 }
 
 bool TM_KeyerAdapter::isKeyDown() const {

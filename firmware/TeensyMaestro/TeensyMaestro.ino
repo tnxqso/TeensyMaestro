@@ -557,6 +557,13 @@ volatile int CWVal      = 20;
 volatile int CWValSave  = 20;
 volatile int CWDelay    = 0; // Apply CW Delay only if configured (non-zero)
 bool ShowContestSerialNumber = false;
+    
+// --- Pro Keyer Settings ---
+int KeyerCompensation = 0;   // 0-255 ms
+int KeyerFirstExtension = 0; // 0-255 ms
+int KeyerFarnsworth = 0;     // 0 = Disabled
+bool KeyerAutospace = false; // ON/OFF
+bool KeyerTuneMode = false;  // Internal state for Tune
 
 // ---------- VFO Acceleration (runtime-tunable via config) ----------
 float VFOAccel_OnFactor      = 1.6f;   // engage earlier when lower
@@ -1111,90 +1118,6 @@ void power_down(const char* reason)
   while (1) { __asm__ volatile("wfi"); }
 }
 
-// Callbacks triggered by the engine
-
-// New callback to echo characters back to the host (resolves hanging)
-void Engine_CharSent_Callback(char c) {
-  // Echo the character back to the WinKeyer protocol handler.
-  // This informs DXLog/SkookumLogger that the character has been processed.
-  WK_OnCharEcho((uint8_t)c);
-}
-
-void Engine_Key_Callback(bool on) {
-  
-  // 1. Physical Keying
-  digitalWrite(KeyOutPin, on ? HIGH : LOW);
-  
-  // 2. UI Updates
-  KeyDown = on; 
-  if (on) {
-      if (!OldKeyDown) OldKeyDown = true;
-      
-      // Audio Logic
-      // Check SideTone enable AND ensure Abort isn't active
-      if (SideTone && !AbortMsg) {
-          // Use the global STFreq variable used by the rest of the system
-          // Protection against 0 Hz
-          unsigned int freq = (STFreq > 0) ? STFreq : 800; 
-          tone(STPin, freq);
-      }
-  } else {
-      if (OldKeyDown) OldKeyDown = false;
-      noTone(STPin);
-  }
-
-  // 3. FlexRadio Ethernet Keying
-  if (KeyerOut == "ETHERNET" && fRig.connected) {
-      if (on) {
-          int txSlice = -1;
-          for (int s = 0; s < fRig.nMaxSlice; ++s) {
-            if (fRig.slice[s].tx == 1 && fRig.slice[s].in_use == 1) {
-              txSlice = s;
-              break;
-            }
-          }
-          if (txSlice >= 0 && fRig.slice[txSlice].mode == "CW" && fRig.transmit.break_in == 1) {
-              char buf[128];
-              snprintf(buf, sizeof(buf), "cw key 1 time=0x%X index=%u client_handle=%s", 
-                 (unsigned)(millis() % 0xFFFF), (unsigned)CWIndex++, fRig.Client_Handle[ClientMenuItem].c_str());
-              fRig.send(buf);
-          }
-      } else {
-          char buf[128];
-          snprintf(buf, sizeof(buf), "cw key 0 time=0x%X index=%u client_handle=%s", 
-             (unsigned)(millis() % 0xFFFF), (unsigned)CWIndex++, fRig.Client_Handle[ClientMenuItem].c_str());
-          fRig.send(buf);
-      }
-  }
-}
-
-// Forward declaration needed because DoRigPTT is in Process_Buttons.ino
-extern bool DoRigPTT(bool on);
-
-void Engine_Ptt_Callback(bool on) {
-    DoRigPTT(on);
-}
-
-void Engine_Wpm_Callback(uint8_t newWpm) {
-    // 1. Update internal state variables
-    CWVal = newWpm;
-    WPM = newWpm;
-    
-    // 2. Update the Physical Encoder (Knob) position
-    // This prevents the knob from jumping back if touched later.
-    if (Encoder_9 == Enc9_CWSpeed) {
-        CWMicEnc.write(CWVal * CWEncSteps);
-    }
-
-    // 3. Refresh the Display
-    // Only redraw if the current menu/encoder selection is actually showing Speed.
-    if (Encoder_9 == Enc9_CWSpeed || Encoder_9 == Enc9_RFPower || Encoder_9 == Enc9_Band) {
-        DispCWSpeed();
-    }
-}
-
-// ==========================================================
-
 /***************************** setup ***************************/
 FLASHMEM void setup()
 {
@@ -1239,23 +1162,6 @@ FLASHMEM void setup()
   TM_RCS::begin();   // Start remote command TCP server if enabled in config
   TeensyMaestroSetup();
   KeyerSetup();
-
-  // Initialize the new non-blocking Keyer Engine
-  g_keyerEngine.begin();
-  g_keyerEngine.attachKeyCallback(Engine_Key_Callback);
-  g_keyerEngine.attachPttCallback(Engine_Ptt_Callback);
-  g_keyerEngine.attachWpmChangeCallback(Engine_Wpm_Callback);
-  g_keyerEngine.attachCharSentCallback(Engine_CharSent_Callback);
-
-  // Set initial speed from saved config
-  g_keyerEngine.setWpm((uint8_t)CWVal);
-  
-  if      (KeyMode == "A") g_keyerEngine.setMode(KeyerMode::IAMBIC_A);
-  else if (KeyMode == "B") g_keyerEngine.setMode(KeyerMode::IAMBIC_B);
-  else if (KeyMode == "U") g_keyerEngine.setMode(KeyerMode::ULTIMATIC);
-  else if (KeyMode == "S") g_keyerEngine.setMode(KeyerMode::BUG);
-  else if (KeyMode == "C") g_keyerEngine.setMode(KeyerMode::SINGLE_PADDLE);
-  else                     g_keyerEngine.setMode(KeyerMode::IAMBIC_B);
 
   // Reserve small buffers for all menu strings to reduce heap fragmentation in Debug builds
   for (int i = 0; i < 30; ++i) {

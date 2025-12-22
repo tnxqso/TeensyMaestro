@@ -1,12 +1,6 @@
 /*
   tm_wk_proto.h
-
   TeensyMaestro — Community Edition (CE)
-  SPDX-License-Identifier: CC-BY-NC-SA-3.0
-  SPDX-FileCopyrightText: 2025 TNX QSO
-
-  A community-maintained edition with open-source utilities
-  for ham radio enthusiasts, focusing on FlexRadio® and Wavelog integrations.
 */
 
 #pragma once
@@ -15,18 +9,18 @@
 #include "tm_wk_debug.h"
 #include "tm_wk_iface.h"
 
-// ---------- Debug trace gates ----------
+// ---------- DEBUG GATES
 #ifndef WK_RX_TRACE
-#define WK_RX_TRACE   0
+  #define WK_RX_TRACE   0
 #endif
 #ifndef WK_ENQ_TRACE
-#define WK_ENQ_TRACE  0
-#endif
+  #define WK_ENQ_TRACE  0
+#endif  
 #ifndef WK_INFO_TRACE
-#define WK_INFO_TRACE 0
-#endif
+  #define WK_INFO_TRACE 0
+#endif  
 #ifndef WK_WARN_TRACE
-#define WK_WARN_TRACE 0
+  #define WK_WARN_TRACE 0
 #endif
 
 // --- WK3-style admin queries ---
@@ -38,6 +32,7 @@
 #endif
 
 extern "C" void WK_OnCharEcho(uint8_t ch);
+extern "C" void WK_OnPaddleActivity(bool active);
 
 class TM_IByteWriter {
 public:
@@ -144,11 +139,12 @@ public:
   uint8_t getWeight() const { return _weight; }
   void    setWeight(uint8_t w) { _weight = w; }
   
-  // NEW: Helper to sync physical knob changes to baseline
   void setLocalBaseline(uint8_t wpm);
 
   void onByte(uint8_t b);
   void onKeyerCharEcho(uint8_t ch) FLASHMEM;
+  void onPaddleActivity(bool active) FLASHMEM; 
+
   void poll() FLASHMEM;
   void sendUnsolicited() FLASHMEM;
   uint8_t buildStatusByte() const FLASHMEM;
@@ -165,7 +161,6 @@ private:
   uint32_t        _lastHostRxMs = 0;
   static constexpr uint16_t ABORT_DROP_QUIET_MS = 120;
 
-  // RX unified FIFO
   uint8_t* _rx;
   bool     _rx_from_extmem = false;
   uint16_t _rhead = 0;

@@ -24,7 +24,6 @@
 #define TM_KEYER_QUEUE_SIZE 256
 #endif
 
-// --- Event Types ---
 enum class KeyerEventType : uint8_t {
   NONE = 0,
   CHAR,           
@@ -40,7 +39,6 @@ struct KeyerEvent {
   uint16_t       value; 
 };
 
-// --- Keyer Modes ---
 enum class KeyerMode : uint8_t {
   IAMBIC_B,       
   IAMBIC_A,       
@@ -49,11 +47,11 @@ enum class KeyerMode : uint8_t {
   SINGLE_PADDLE   
 };
 
-// --- Callbacks ---
 typedef void (*KeyerStateCallback)(bool active);
 typedef void (*PttStateCallback)(bool active);
 typedef void (*WpmChangeCallback)(uint8_t wpm);
 typedef void (*CharSentCallback)(char c);
+typedef void (*PaddleActivityCallback)(bool active); // Callback for DXLog break-in detection
 
 class TM_Keyer_Engine {
 public:
@@ -77,6 +75,9 @@ public:
   void setStraightKey(bool pressed);
   void onStraightKeyChange(bool pressed);
 
+  // Helper to check if paddles are physically pressed (for status byte)
+  bool isPaddleActive() const; 
+
   // --- Configuration ---
   void setWpm(uint8_t wpm);
   uint8_t getWpm() const { return _wpm; }
@@ -86,19 +87,18 @@ public:
   void setMode(KeyerMode mode);
   
   void setPttLeadTail(uint16_t leadMs, uint16_t tailMs);
-  
-  // New Pro Features
-  void setFarnsworth(uint8_t wpm);       // 0 to disable
-  void setCompensation(uint8_t ms);      // Added to KeyDown, subtracted from Space
-  void setFirstExtension(uint8_t ms);    // Added to very first element of a sequence
-  void setAutospace(bool active);        // Enforce char spacing in manual mode
-  void setTune(bool active);             // Constant carrier (with timeout)
+  void setFarnsworth(uint8_t wpm); 
+  void setCompensation(uint8_t ms);
+  void setFirstExtension(uint8_t ms);
+  void setAutospace(bool active);
+  void setTune(bool active);
 
   // --- Callbacks ---
   void attachKeyCallback(KeyerStateCallback cb) { _cbKey = cb; }
   void attachPttCallback(PttStateCallback cb)   { _cbPtt = cb; }
   void attachWpmChangeCallback(WpmChangeCallback cb) { _cbWpm = cb; }
   void attachCharSentCallback(CharSentCallback cb)   { _cbChar = cb; }
+  void attachPaddleActivityCallback(PaddleActivityCallback cb) { _cbPaddle = cb; }
 
   // --- Status ---
   bool isBusy() const;
@@ -116,14 +116,14 @@ private:
     INTER_WORD_SPACE,
     BUFFERED_WAIT,
     PTT_TAIL_DELAY,
-    TUNE_ACTIVE        // New State for Tune Mode
+    TUNE_ACTIVE
   };
 
   State _state = State::IDLE;
 
   // Config
   uint8_t  _wpm = 20;
-  uint8_t  _farnsworthWpm = 0;   // 0 = Disabled
+  uint8_t  _farnsworthWpm = 0;
   uint8_t  _weight = 50;
   float    _ratio = 3.0f;
   uint16_t _pttLeadMs = 0;
@@ -133,17 +133,17 @@ private:
   bool     _autospace = false;
   KeyerMode _mode = KeyerMode::IAMBIC_B;
 
-  // Runtime State
+  // Runtime
   uint32_t _nextEventMicros = 0;
   uint32_t _calculatedSpaceMicros = 0; 
-  uint32_t _tuneStartMs = 0;      // Safety timeout for tune
+  uint32_t _tuneStartMs = 0;
   
   bool     _pttActive = false;
   bool     _keyActive = false;
   bool     _inProsign = false;
   bool     _straightKeyActive = false;
-  bool     _isManualMode = false;
-  bool     _isFirstElement = true; // Tracks if we are starting a new sequence (for Extension)
+  bool     _isManualMode = false;   // True if sending via paddles, False if via queue
+  bool     _isFirstElement = true;
 
   uint8_t  _currentMorseCode = 0;
   uint8_t  _currentMorseLen = 0;
@@ -154,7 +154,7 @@ private:
   bool _paddleMemoryDash = false; 
   bool _lastElementWasDot = false;
   bool _ultimaticPriorityDot = false;
-  uint32_t _lastPaddleReleaseMicros = 0; // For Autospace timing
+  uint32_t _lastPaddleReleaseMicros = 0;
 
   KeyerEvent _queue[TM_KEYER_QUEUE_SIZE];
   uint16_t   _head = 0;
@@ -164,6 +164,7 @@ private:
   PttStateCallback   _cbPtt = nullptr;
   WpmChangeCallback  _cbWpm = nullptr;
   CharSentCallback   _cbChar = nullptr;
+  PaddleActivityCallback _cbPaddle = nullptr;
 
   void setKey(bool on);
   void setPtt(bool on);
@@ -172,7 +173,6 @@ private:
   void startElement(bool isDash);
   
   uint32_t getSafeStartTime();
-  // Helper: useFarnsworth=true calculates dot length based on fast WPM
   uint32_t calculateDotMicros(bool useFarnsworth = false) const;
   void lookupMorse(char c, uint8_t &code, uint8_t &len);
 };

@@ -11,10 +11,7 @@
 
 #include "TM_Keyer_Engine.h"
 #include <ctype.h> 
-
-// Debug Level: 0 = Off, 1 = Char/State
-#undef WK_INFO_TRACE
-#define WK_INFO_TRACE 0
+#include "tm_wk_proto.h"
 
 // Morse Table (LSB = First Element. 0=Dot, 1=Dash)
 static const struct { uint8_t len; uint8_t code; } MorseTable[] = {
@@ -55,6 +52,12 @@ void TM_Keyer_Engine::begin() {
   _lastPaddleReleaseMicros = 0;
 }
 
+// --- Status Helpers ---
+
+bool TM_Keyer_Engine::isPaddleActive() const {
+    return _paddleDot || _paddleDash;
+}
+
 // --- Inputs ---
 
 void TM_Keyer_Engine::updatePaddles(bool dotPressed, bool dashPressed) {
@@ -65,18 +68,31 @@ void TM_Keyer_Engine::updatePaddles(bool dotPressed, bool dashPressed) {
   bool wasPressed = _paddleDot || _paddleDash;
   bool isPressed  = dotPressed || dashPressed;
 
-  // Track release time for Autospace
   if (wasPressed && !isPressed) {
       _lastPaddleReleaseMicros = micros();
   }
-  // If pressed, we are no longer "First Element" of a sequence usually, 
-  // but if we were idle for a while, startElement handles logic.
   
+  // 1. Update internal state FIRST
   _paddleDot = dotPressed;
   _paddleDash = dashPressed;
+  
+  // 2. Notify callback (Protocol will read the NEW state via isPaddleActive)
+  if (isPressed != wasPressed) {
+      if (_cbPaddle) _cbPaddle(isPressed);
 
+      #if WK_INFO_TRACE
+         Serial.print("ENG: Paddles changed -> "); Serial.println(isPressed);
+      #endif
+  }
+
+  // 3. Break-in Logic
   bool queueBusy = (_head != _tail) || (_currentMorseLen > 0);
-  if (queueBusy && !_isManualMode && (dotPressed || dashPressed)) {
+  
+  // If queue is playing from host, and we touch paddles -> Abort Host
+  if (queueBusy && !_isManualMode && isPressed) {
+      #if WK_INFO_TRACE
+        Serial.println("ENG: Break-in triggered by paddle!");
+      #endif
       abortNow(); 
   }
 
@@ -95,14 +111,12 @@ void TM_Keyer_Engine::setStraightKey(bool pressed) {
         _straightKeyActive = true;
         if (!_pttActive) setPtt(true);
         if (!_keyActive) setKey(true);
-        // Straight key counts as activity, reset First Extension logic for subsequent auto
         _isFirstElement = false; 
     } else {
         if (_straightKeyActive) {
             setKey(false);
             setPtt(false); 
             _straightKeyActive = false;
-            // When key goes up, we prepare for next potentially "First" element after pause
             _state = State::IDLE; 
         }
     }
@@ -146,6 +160,9 @@ void TM_Keyer_Engine::abortNow() {
   _paddleMemoryDash = false;
   _isManualMode = false;
   _isFirstElement = true;
+  
+  // Note: We do NOT clear _paddleDot/_paddleDash here, 
+  // as they reflect physical state.
 }
 
 void TM_Keyer_Engine::clearQueue() {
@@ -217,14 +234,9 @@ bool TM_Keyer_Engine::isTransmitting() const {
 
 // --- Logic ---
 
-// Calculate length of 1 dot in microseconds
-// useFarnsworth: If true, use the faster Farnsworth speed (for dot/dash duration)
-//                If false, use standard WPM (for spacing)
 uint32_t TM_Keyer_Engine::calculateDotMicros(bool useFarnsworth) const {
     uint8_t speed = _wpm;
-    if (useFarnsworth && _farnsworthWpm > _wpm) {
-        speed = _farnsworthWpm;
-    }
+    if (useFarnsworth && _farnsworthWpm > _wpm) speed = _farnsworthWpm;
     if (speed < 1) speed = 1;
     return 1200000UL / speed;
 }
@@ -235,10 +247,10 @@ void TM_Keyer_Engine::lookupMorse(char c, uint8_t &code, uint8_t &len) {
     uint8_t idx = c - ' ';
     len = MorseTable[idx].len;
     code = MorseTable[idx].code;
-  } else if (c == '^') { len = 5; code = 0x16; } // Å
-  else if (c == '{') { len = 4; code = 0x0A; } // Ä
-  else if (c == '}') { len = 4; code = 0x07; } // Ö
-  else if (c == '~') { len = 4; code = 0x0C; } // Ü
+  } else if (c == '^') { len = 5; code = 0x16; } 
+  else if (c == '{') { len = 4; code = 0x0A; } 
+  else if (c == '}') { len = 4; code = 0x07; } 
+  else if (c == '~') { len = 4; code = 0x0C; } 
   else { len = 0; code = 0; }
 }
 
@@ -254,7 +266,7 @@ void TM_Keyer_Engine::checkPaddles() {
         } else {
             setKey(false);
             if (!_straightKeyActive) setPtt(false);
-            _isFirstElement = true; // Reset when idle
+            _isFirstElement = true;
         }
         return;
     }
@@ -321,17 +333,12 @@ void TM_Keyer_Engine::checkPaddles() {
     if (sendDash) _paddleMemoryDash = false;
 
     if (sendDot) {
-        _isManualMode = true; 
-        startElement(false);
-        _lastElementWasDot = true;
+        _isManualMode = true; startElement(false); _lastElementWasDot = true;
     } else if (sendDash) {
-        _isManualMode = true; 
-        startElement(true);
-        _lastElementWasDot = false;
+        _isManualMode = true; startElement(true); _lastElementWasDot = false;
     } else {
         // Paddles released
         bool queueHasData = (_head != _tail);
-        
         if (_pttActive && _state == State::IDLE && !_paddleDot && !_paddleDash && !queueHasData) {
              if (_pttTailMs > 0) {
                  _state = State::PTT_TAIL_DELAY;
@@ -339,7 +346,6 @@ void TM_Keyer_Engine::checkPaddles() {
              } else {
                  setPtt(false);
              }
-             // We are fully idle now, reset First Extension logic
              _isFirstElement = true;
         }
     }
@@ -357,11 +363,8 @@ uint32_t TM_Keyer_Engine::getSafeStartTime() {
 void TM_Keyer_Engine::poll() {
   uint32_t now = micros();
 
-  // Safety timeout for Tune Mode (10 seconds)
   if (_state == State::TUNE_ACTIVE) {
-      if (millis() - _tuneStartMs > 10000) {
-          setTune(false); // Force off
-      }
+      if (millis() - _tuneStartMs > 10000) setTune(false);
       return;
   }
 
@@ -371,21 +374,9 @@ void TM_Keyer_Engine::poll() {
 
   switch (_state) {
     case State::IDLE:
-      // Autospace Logic:
-      // If manual mode, Autospace ON, and paddles released for > 1 dot time:
-      // Force next event to align with character boundary if paddle pressed soon.
+      // Autospace logic placeholder
       if (_autospace && _isManualMode && !_paddleDot && !_paddleDash) {
-           uint32_t elapsed = now - _lastPaddleReleaseMicros;
-           uint32_t dotTime = calculateDotMicros(true);
-           if (elapsed > dotTime && elapsed < (dotTime * 3)) {
-               // We are in the "danger zone" for sloppy spacing.
-               // If user presses now, we should ideally wait until 3 dots passed.
-               // Implementation: If checkPaddles detects press, startElement will happen.
-               // We can modify startElement or handle it here? 
-               // Actually, simpler logic: If press happens inside the gap, we let it go.
-               // If it happens LATE (e.g. >1.5 dots), we force a full 3 dot wait.
-               // For now, let's keep Autospace simple/disabled by default until tuned.
-           }
+           // Logic disabled for now
       }
 
       checkPaddles();
@@ -420,14 +411,8 @@ void TM_Keyer_Engine::poll() {
               checkPaddles();
               if (_state != State::IDLE) poll();
           } else {
-              // QUEUE MODE: Apply Farnsworth spacing here if needed
               _state = _inProsign ? State::ELEMENT_SPACE : State::INTER_CHAR_SPACE;
-              
-              // Standard: 3 dots total (1 passed + 2 wait).
-              // Farnsworth: Spacing is based on SLOW speed, Elements on FAST speed.
-              uint32_t delay = calculateDotMicros(false) * 2; // Use slow speed for spacing
-              
-              _nextEventMicros = getSafeStartTime() + delay;
+              _nextEventMicros = getSafeStartTime() + calculateDotMicros(false) * 2;
               if (_inProsign) _nextEventMicros = getSafeStartTime();
           }
       } else {
@@ -442,7 +427,6 @@ void TM_Keyer_Engine::poll() {
     case State::TRANSMITTING_ELEMENT:
       setKey(false);
       _state = State::ELEMENT_SPACE;
-      // Use calculated space (includes Weighting and Farnsworth adjustments)
       _nextEventMicros = getSafeStartTime() + _calculatedSpaceMicros; 
       break;
 
@@ -468,10 +452,11 @@ void TM_Keyer_Engine::poll() {
       _lastElementWasDot = false;
       _paddleMemoryDot = false;
       _paddleMemoryDash = false;
-      _isFirstElement = true; // Sequence ended
+      _isFirstElement = true;
       
       checkPaddles();
       if (_state == State::IDLE) processQueue();
+      
       if (_state != State::IDLE) poll();
       break;
       
@@ -484,40 +469,25 @@ void TM_Keyer_Engine::startElement(bool isDash) {
   setKey(true);
   _state = State::TRANSMITTING_ELEMENT;
   
-  // 1. Calculate Base Duration (Use Fast/Farnsworth speed for elements)
   uint32_t dotLen = calculateDotMicros(true); 
   uint32_t nominalDuration = isDash ? (dotLen * (uint32_t)_ratio) : dotLen;
   
-  // 2. Apply Weighting
-  // Weight 50 = standard. >50 = longer element, shorter space.
   int32_t weightDelta = 0;
-  if (_weight != 50) {
-      weightDelta = ((int32_t)_weight - 50) * (int32_t)dotLen / 50;
-  }
+  if (_weight != 50) weightDelta = ((int32_t)_weight - 50) * (int32_t)dotLen / 50;
   
-  // 3. Apply Keying Compensation (Time added to element, subtracted from space)
-  // _compensationMs is in milliseconds -> convert to micros
   int32_t compMicros = (int32_t)_compensationMs * 1000;
-
   uint32_t toneDuration = nominalDuration + weightDelta + compMicros;
-  
-  // Space is normally 1 dotLen. We subtract weight delta and compensation.
-  // Note: For Farnsworth, the element space is still based on the Fast speed.
   int32_t spaceDuration = (int32_t)dotLen - weightDelta - compMicros;
 
-  // 4. Apply First Extension (Only on tone, does not affect following space)
   if (_isFirstElement) {
       toneDuration += (_firstExtensionMs * 1000);
       _isFirstElement = false;
   }
 
-  // Safety clamps
   if ((int32_t)toneDuration < 1000) toneDuration = 1000;
   if (spaceDuration < 1000) spaceDuration = 1000;
 
-  // Store space for next state
   _calculatedSpaceMicros = (uint32_t)spaceDuration;
-
   _nextEventMicros = getSafeStartTime() + toneDuration;
 }
 
@@ -578,18 +548,19 @@ void TM_Keyer_Engine::processQueue() {
     case KeyerEventType::CHAR:
       {
         char c = (char)evt.value;
+        #if WK_INFO_TRACE
+          Serial.print("ENG: '"); Serial.print(c); Serial.println("'");
+        #endif
+        
         if (_cbChar) _cbChar(c);
 
         if (c == ' ') {
           _state = State::INTER_WORD_SPACE;
           _isManualMode = false;
-          // Word spacing: Use Slow/Base speed for Farnsworth
-          uint32_t dotLen = calculateDotMicros(false); 
-          // Need 4 more dots (Total 7: 1 elem + 2 char + 4 word)
-          // Since we are coming from INTER_CHAR state (3 dots passed), we need 4 more.
-          // Note: Logic in START_ELEMENT handles char spacing. 
-          // This state is hit if CHAR is ' '.
-          _nextEventMicros = micros() + (dotLen * 4); 
+          // Word space = 7 dots total. 
+          // 1 (Element Space) + 2 (Inter-char) already waited = 3.
+          // Need 4 more.
+          _nextEventMicros = micros() + (calculateDotMicros() * 4); 
         } else {
           lookupMorse(c, _currentMorseCode, _currentMorseLen);
           if (_currentMorseLen > 0) {

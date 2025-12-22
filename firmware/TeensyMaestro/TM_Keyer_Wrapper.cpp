@@ -15,9 +15,11 @@
 #include "tm_system_utils.h" 
 #include "Encoder.h"         
 #include <FlexRigTeensy.h>   
-#include "tm_wk_proto.h"     // <--- ADDED: Required for protocol sync
+#include "tm_wk_proto.h"     
 
-// --- Globals from TeensyMaestro.ino ---
+// C-hook declaration for Paddle Status
+extern "C" void WK_OnPaddleActivity(bool active);
+
 extern TM_Keyer_Engine g_keyerEngine;
 extern FlexRig* g_fRig; 
 
@@ -29,9 +31,15 @@ extern Encoder CWMicEnc;
 extern int Encoder_9;
 extern int CWEncSteps;
 
+// Configuration Globals
+extern String KeyMode;
+extern int KeyerCompensation;
+extern int KeyerFirstExtension;
+extern int KeyerFarnsworth;
+extern bool KeyerAutospace;
+
 extern byte DotPin;
 extern byte DashPin;
-
 static const byte LOCAL_KeyOutPin      = 33;
 static const byte LOCAL_StraightKeyPin = 32;
 static const byte LOCAL_STPin          = 34;
@@ -49,6 +57,16 @@ static const int Enc9_CWSpeed = 0;
 static const int Enc9_RFPower = 2;
 static const int Enc9_Band    = 8;
 
+// Callbacks
+void Engine_Key_Callback(bool on);
+void Engine_Ptt_Callback(bool on);
+void Engine_Wpm_Callback(uint8_t newWpm);
+void Engine_CharSent_Callback(char c);
+
+void Engine_Paddle_Callback(bool active) {
+    WK_OnPaddleActivity(active);
+}
+
 // --- Implementation of Keyer API ---
 
 void KeyerSetup() {
@@ -63,8 +81,34 @@ void KeyerSetup() {
 
   g_KeyerTimingActive = false;
   
-  if (WPM < 5) WPM = 20;
-  g_keyerEngine.setWpm((uint8_t)WPM);
+  // Initialize the Engine
+  g_keyerEngine.begin();
+  
+  // Attach Callbacks
+  g_keyerEngine.attachKeyCallback(Engine_Key_Callback);
+  g_keyerEngine.attachPttCallback(Engine_Ptt_Callback);
+  g_keyerEngine.attachWpmChangeCallback(Engine_Wpm_Callback);
+  g_keyerEngine.attachCharSentCallback(Engine_CharSent_Callback);
+  g_keyerEngine.attachPaddleActivityCallback(Engine_Paddle_Callback); 
+
+  // Set Initial Speed
+  if (CWVal < 5) CWVal = 20;
+  WPM = CWVal; 
+  g_keyerEngine.setWpm((uint8_t)CWVal);
+
+  // Set Keyer Mode
+  if      (KeyMode == "A") g_keyerEngine.setMode(KeyerMode::IAMBIC_A);
+  else if (KeyMode == "B") g_keyerEngine.setMode(KeyerMode::IAMBIC_B);
+  else if (KeyMode == "U") g_keyerEngine.setMode(KeyerMode::ULTIMATIC);
+  else if (KeyMode == "S") g_keyerEngine.setMode(KeyerMode::BUG);
+  else if (KeyMode == "C") g_keyerEngine.setMode(KeyerMode::SINGLE_PADDLE);
+  else                     g_keyerEngine.setMode(KeyerMode::IAMBIC_B);
+
+  // Set Pro Features
+  g_keyerEngine.setCompensation((uint8_t)KeyerCompensation);
+  g_keyerEngine.setFirstExtension((uint8_t)KeyerFirstExtension);
+  g_keyerEngine.setFarnsworth((uint8_t)KeyerFarnsworth);
+  g_keyerEngine.setAutospace(KeyerAutospace);
 }
 
 void Keyer_Beep(uint16_t freq, uint16_t ms) {
@@ -77,11 +121,8 @@ void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline)
 
   CWVal = newWpm;
   
-  // Logic: If preserveBaseline is FALSE, it means the user turned the knob.
-  // We must tell the WinKeyer Protocol that this is the new "Baseline" (Knob speed).
   if (!preserveBaseline) {
     CWValSave = CWVal;
-    
     if (TM_WK_Protocol::active()) {
         TM_WK_Protocol::active()->setLocalBaseline((uint8_t)CWVal);
     }
@@ -156,4 +197,54 @@ extern "C" {
     uint16_t Keyer_TxQ_Used_C(void) {
         return Keyer_TxQ_Used();
     }
+}
+
+// ENGINE CALLBACKS
+extern bool DoRigPTT(bool on); 
+extern bool SideTone;
+extern int STFreq;
+extern volatile bool AbortMsg;
+extern volatile bool KeyDown;
+extern bool OldKeyDown;
+extern String KeyerOut;
+extern int ClientMenuItem;
+extern volatile unsigned int CWIndex;
+
+void Engine_Ptt_Callback(bool on) { DoRigPTT(on); }
+void Engine_Wpm_Callback(uint8_t newWpm) {
+    CWVal = newWpm; WPM = newWpm;
+    if (Encoder_9 == Enc9_CWSpeed) CWMicEnc.write(CWVal * CWEncSteps);
+    if (Encoder_9 == Enc9_CWSpeed || Encoder_9 == Enc9_RFPower || Encoder_9 == Enc9_Band) DispCWSpeed();
+}
+void Engine_CharSent_Callback(char c) { WK_OnCharEcho((uint8_t)c); }
+
+void Engine_Key_Callback(bool on) {
+  digitalWrite(LOCAL_KeyOutPin, on ? HIGH : LOW);
+  digitalWrite(LED_BUILTIN, on ? HIGH : LOW);
+  KeyDown = on; 
+  if (on) {
+      if (!OldKeyDown) OldKeyDown = true;
+      if (SideTone && !AbortMsg) {
+          unsigned int safeFreq = (STFreq < 200) ? 800 : STFreq;
+          tone(LOCAL_STPin, safeFreq);
+      } 
+  } else {
+      if (OldKeyDown) OldKeyDown = false;
+      noTone(LOCAL_STPin);
+  }
+  if (KeyerOut == "ETHERNET" && g_fRig && g_fRig->connected) {
+      int txSlice = -1;
+      for (int s = 0; s < g_fRig->nMaxSlice; ++s) {
+         if (g_fRig->slice[s].tx == 1 && g_fRig->slice[s].in_use == 1) { txSlice = s; break; }
+      }
+      char buf[128];
+      if (on && txSlice >= 0 && g_fRig->slice[txSlice].mode == "CW" && g_fRig->transmit.break_in == 1) {
+          snprintf(buf, sizeof(buf), "cw key 1 time=0x%X index=%u client_handle=%s", 
+             (unsigned)(millis() % 0xFFFF), (unsigned)CWIndex++, g_fRig->Client_Handle[ClientMenuItem].c_str());
+      } else {
+          snprintf(buf, sizeof(buf), "cw key 0 time=0x%X index=%u client_handle=%s", 
+             (unsigned)(millis() % 0xFFFF), (unsigned)CWIndex++, g_fRig->Client_Handle[ClientMenuItem].c_str());
+      }
+      g_fRig->send(buf);
+  }
 }
