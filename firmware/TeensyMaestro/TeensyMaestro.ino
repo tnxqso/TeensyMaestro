@@ -1331,23 +1331,6 @@ void loop()
   bool pinDash     = (digitalRead(DashPin) == LOW);
   bool pinStraight = (digitalRead(StraightKeyPin) == LOW);
 
-  // --- DEBUG INPUTS ---
-  // If you do not see these lines in the Serial Monitor when pressing the paddle,
-  // there is an issue with the pin definitions or the hardware connection.
-  static bool prevDot = false;
-  static bool prevDash = false;
-  if (pinDot != prevDot) {
-      if (pinDot) Serial.println("PAD: Physical DOT Pressed");
-      else        Serial.println("PAD: Physical DOT Released");
-      prevDot = pinDot;
-  }
-  if (pinDash != prevDash) {
-      if (pinDash) Serial.println("PAD: Physical DASH Pressed");
-      else         Serial.println("PAD: Physical DASH Released");
-      prevDash = pinDash;
-  }
-  // --------------------
-
   // Handle Handedness (Swap if left-handed)
   // 'Handed' variable comes from global settings (0=Right, 1=Left)
   bool logicalDot  = (Handed == 0) ? pinDot : pinDash;

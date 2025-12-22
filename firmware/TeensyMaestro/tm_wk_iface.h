@@ -1,4 +1,6 @@
 /*
+  tm_wk_iface.h
+
   TeensyMaestro — Community Edition (CE)
   SPDX-License-Identifier: CC-BY-NC-SA-3.0
   SPDX-FileCopyrightText: 2025 TNX QSO
@@ -36,6 +38,11 @@ public:
   virtual void setWeightPermille(uint16_t per_mille) = 0; // 1000 equals 100 percent
   virtual void setDitDahRatio(uint8_t ratio) = 0;         // see WinKey docs
   virtual void setSidetone(bool on) = 0;
+  
+  // Pro Features (K3NG / WinKeyer 2)
+  virtual void setKeyCompensation(uint8_t ms) = 0;
+  virtual void setFirstExtension(uint8_t ms) = 0;
+  virtual void setFarnsworth(uint8_t wpm) = 0;
 
   // Status
   virtual bool isBusy() const = 0;
@@ -51,14 +58,13 @@ public:
   virtual void keyImmediate(bool down) = 0;  // Manual key line control
 
   // Hard abort: stop any in-progress element/timers immediately.
-  // This must unkey NOW, not just drain queued text.
   virtual void abortNow() = 0;
 
   // Flush any queued downstream text immediately
   virtual void clearTextQueue() = 0;
 };
 
-// TeensyMaestro adapter, wire these to Keyer.ino
+// TeensyMaestro adapter, wire these to Keyer Engine
 class TM_KeyerAdapter : public TM_IKeyer {
 public:
   TM_KeyerAdapter();
@@ -74,6 +80,11 @@ public:
   void setWeightPermille(uint16_t per_mille) override;
   void setDitDahRatio(uint8_t ratio) override;
   void setSidetone(bool on) override;
+  
+  // Pro Features
+  void setKeyCompensation(uint8_t ms) override;
+  void setFirstExtension(uint8_t ms) override;
+  void setFarnsworth(uint8_t wpm) override;
 
   bool isBusy() const override;
   bool isPaddlePressed() const override;
