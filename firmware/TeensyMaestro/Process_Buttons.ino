@@ -392,13 +392,6 @@ void GetButton()
 {
   GotBtn = false;
 
-  //  if(AbortMsg)
-  //  {
-  //    return;
-  //  }
-
-
-
   // Select MUX board
   for (MUXidx = 0; MUXidx < 2; MUXidx++)
   {
@@ -435,18 +428,6 @@ void GetButton()
         debug(MUXidx);
         debug(" ");
         debugln(BTNidx);
-
-        //        if(AbortMsg)
-        //        {
-        //          return;
-        //        }
-
-        //        if(MsgActive)
-        //        {
-        //          debugln("Button pushed while MsgActive");
-        //          AbortMsg = true;
-        //          return;
-        //        }
 
         ResetScreenSaver("Buttons: bank B");
         GotBtn = true;
@@ -2019,54 +2000,3 @@ void CWButton(int base_btn, bool isLongPress)
     SendMsg(CWMsg[Btn - 1]);
   }
 }
-
-/***************************** GetMsgAbortBtn ***************************/
-//void GetMsgAbortBtn()
-//{
-//  GotBtn = false;
-//
-//  // Select MUX board
-//  for(MUXidx=0; MUXidx<2; MUXidx++)
-//  {
-//    // Set Ena address on Teensy pins
-//    for(int i = 0; i<2; i++)
-//    {
-//      for(int j=0; j<2; j++)
-//      {
-//        digitalWrite(MUXEnaPin[j], HIGH);
-//      }
-//      digitalWrite(MUXEnaPin[MUXidx], bitRead(MUXidx,i));
-//    }
-//
-//    delayMicroseconds(250);
-//
-//    for(BTNidx=0; BTNidx<16; BTNidx++)
-//    {
-//      // Set Mux address on Teensy pins
-//      for(int k=0; k<4; k++)
-//      {
-//        digitalWrite(MUXPin[k], bitRead(BTNidx,k));
-//      }
-//
-//      delayMicroseconds(250);
-//
-//      if(digitalRead(MUXIOPin) == LOW)
-//      {
-//        debug("Button "); debug(MUXidx); debug(" "); debugln(BTNidx);
-//
-//        if(MsgActive)
-//        {
-//          debugln("GetMsgAbortBtn - Button pushed while MsgActive");
-//          AbortMsg = true;
-//          digitalWrite(KeyOutPin, LOW);  // Unkey transmitter
-//          DotTimer.end();
-//          DotPressed = false;
-//          DashPressed = false;
-//          CurElement = 0;
-//          MsgActive = false;
-//          delay(250);
-//        }
-//      }
-//    }
-//  }
-//}
