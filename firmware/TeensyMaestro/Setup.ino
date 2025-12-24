@@ -416,7 +416,9 @@ FLASHMEM void TeensyMaestroSetup()
 
     // ----------------------- OTHER RADIO INIT ----------------------------
     SaveBkInDelay = fRig.transmit.break_in_delay;
-    if (KeyerOut == "ETHERNET") {
+    
+    // Apply CW Delay logic if we are using Network keying (Ethernet OR Both)
+    if (KeyerOut == "ETHERNET" || KeyerOut == "BOTH") {
       // Apply CW Delay only if configured (non-zero)
       if (CWDelay > 0) {
         // Enforce minimum value of 30 ms to avoid too-short hang times
@@ -437,14 +439,6 @@ FLASHMEM void TeensyMaestroSetup()
 
     CheckInBand(A);
     CheckInBand(B);
-
-    // *******************************************************************
-    // REMOVED: "Fix RF power display glitch" / TX Toggle
-    // The previous code toggled TX on/off here which caused SideTone 
-    // to disappear on some radios because it disabled Monitor.
-    // We now skip this toggle to ensure side tone reliability.
-    // *******************************************************************
-    debugln(F("Setup: TX Toggle skipped to preserve SideTone."));
 
     // Pan IDs may be zero/invalid early; print safely
     auto _safePrintPan = [&](const char* label, int panId){

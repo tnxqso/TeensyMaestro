@@ -949,7 +949,7 @@ int Handed = 0;  // right = 0, left = 1
 String HandedTxt;
 
 volatile bool KeyDown    = false;
-String KeyerOut          = "LOCAL";  // LOCAL, ETHERNET
+String KeyerOut          = "LOCAL";  // LOCAL, ETHERNET or BOTH
 String KeyMode           = "B";      //A, B, U
 volatile bool KeyPressed = false;
 

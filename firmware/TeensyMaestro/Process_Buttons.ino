@@ -1512,42 +1512,42 @@ void HandleBtnSelect()
           break;
 
         case BtnMenuCWLocalEth:
-          //debug("<"); debug(KeyerOut); debugln(">");
-          //bool CWmode = false;
-
-          for (int i = 0; i < 2; i++)
-          {
-            if (fRig.slice[i].mode == "CW" && fRig.slice[i].tx == 1)
-            {
+        {
+          bool CWmode = false;
+          for (int i = 0; i < 2; i++) {
+            if (fRig.slice[i].mode == "CW" && fRig.slice[i].tx == 1) {
               CWmode = true;
             }
           }
 
-          if (KeyerOut == "LOCAL")
-          {
-            KeyerOut      = "ETHERNET";
-            SaveBkInDelay = fRig.transmit.break_in_delay;
-
-            if (fRig.transmit.break_in_delay < 30 && CWmode)
-            {
-              debug("SaveBkInDelay(E): ");
-              debugln(SaveBkInDelay);
-              fRig.setCwBreakinInDelay(30);
-            }
-          }
-          else
-          {
+          // Cycle through modes: LOCAL -> ETHERNET -> BOTH -> LOCAL...
+          if (KeyerOut == "LOCAL") {
+            KeyerOut = "ETHERNET";
+          } else if (KeyerOut == "ETHERNET") {
+            KeyerOut = "BOTH";
+          } else {
             KeyerOut = "LOCAL";
-            debug("SaveBkInDelay(L): ");
-            debugln(SaveBkInDelay);
-            fRig.setCwBreakinInDelay(SaveBkInDelay);
+          }
+          
+          // Logic for CW Delay handling when switching TO network modes
+          if (KeyerOut == "ETHERNET" || KeyerOut == "BOTH") {
+             SaveBkInDelay = fRig.transmit.break_in_delay; // Backup current radio delay
+             if (fRig.transmit.break_in_delay < 30 && CWmode) {
+                debug("Enforcing Min Delay (Net): "); debugln(30);
+                fRig.setCwBreakinInDelay(30);
+             }
+          } 
+          // Logic for restoring delay when switching back to pure LOCAL
+          else if (KeyerOut == "LOCAL") {
+             debug("Restoring Delay (Local): "); debugln(SaveBkInDelay);
+             fRig.setCwBreakinInDelay(SaveBkInDelay);
           }
 
           MenuItem[MenuIDX][7] = "Keyer Output: " + KeyerOut;
           DispMenu(MenuIDX);
           MenuItemIDX = 0;
-
           break;
+        }
 
         case BtnMenuSetBand:
           ActivePan = fRig.slice[SliceActiveVal].pan;

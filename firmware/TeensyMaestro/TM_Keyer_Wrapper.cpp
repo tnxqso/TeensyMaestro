@@ -122,40 +122,40 @@ void Engine_Key_Callback(bool on) {
       noTone(LOCAL_STPin);
   }
 
-  // 2. Transmitter Keying Logic (Separated for clarity and correctness)
-
-  if (KeyerOut == "LOCAL") {
-    // In LOCAL mode, we simply toggle the physical keying pin.
-    // The radio is expected to handle TX switching via its KEY jack (VOX/QSK).
-    // This matches the original Keyer.ino behavior.
-    digitalWrite(LOCAL_KeyOutPin, on ? HIGH : LOW);
+  // Handle LOCAL physical keying (Local OR Both)
+  if (KeyerOut == "LOCAL" || KeyerOut == "BOTH") {
+      // Toggle the physical keying pin.
+      digitalWrite(LOCAL_KeyOutPin, on ? HIGH : LOW);
   }
-  else if (KeyerOut == "ETHERNET") {
-    // For ETHERNET, we must be connected and in the correct mode to send commands.
-    if (g_fRig && g_fRig->connected) {
-        int txSlice = -1;
-        for (int s = 0; s < g_fRig->nMaxSlice; ++s) {
-            if (g_fRig->slice[s].tx == 1 && g_fRig->slice[s].in_use == 1) {
-                txSlice = s;
-                break;
-            }
-        }
 
-        // Safety Guard: Only send network command if in CW mode with break-in enabled.
-        // If conditions are not met, we do nothing, allowing sidetone to continue for practice.
-        if (txSlice >= 0 && g_fRig->slice[txSlice].mode == "CW" && g_fRig->transmit.break_in == 1) {
-            char buf[128];
-            int keyState = on ? 1 : 0;
-            snprintf(buf, sizeof(buf), "cw key %d time=0x%X index=%u client_handle=%s", 
-               keyState,
-               (unsigned)(millis() % 0xFFFF), 
-               (unsigned)CWIndex++, 
-               g_fRig->Client_Handle[ClientMenuItem].c_str());
+  // Handle ETHERNET network keying (Ethernet OR Both)
+  if (KeyerOut == "ETHERNET" || KeyerOut == "BOTH") {
+      // For ETHERNET, we must be connected and in the correct mode to send commands.
+      if (g_fRig && g_fRig->connected) {
+          int txSlice = -1;
+          for (int s = 0; s < g_fRig->nMaxSlice; ++s) {
+              if (g_fRig->slice[s].tx == 1 && g_fRig->slice[s].in_use == 1) {
+                  txSlice = s;
+                  break;
+              }
+          }
 
-            g_fRig->send(buf);
-        }
-    }
+          // Safety Guard: Only send network command if in CW mode with break-in enabled.
+          // If conditions are not met, we do nothing (sidetone continues for practice).
+          if (txSlice >= 0 && g_fRig->slice[txSlice].mode == "CW" && g_fRig->transmit.break_in == 1) {
+              char buf[128];
+              int keyState = on ? 1 : 0;
+              snprintf(buf, sizeof(buf), "cw key %d time=0x%X index=%u client_handle=%s", 
+                  keyState,
+                  (unsigned)(millis() % 0xFFFF), 
+                  (unsigned)CWIndex++, 
+                  g_fRig->Client_Handle[ClientMenuItem].c_str());
+
+              g_fRig->send(buf);
+          }
+      }
   }
+
 }
 
 // Callback: Character Sent (Echo back to host)

@@ -1398,10 +1398,10 @@ if (InSetup && InBufUC.indexOf("CW FARNSWORTH:") >= 0) {
     String v  = ParseStringValue(line, "Keyer Out:", KeyerOut);
     String vu = v; vu.toUpperCase();
 
-    if (vu == "LOCAL" || vu == "ETHERNET") {
+    if (vu == "LOCAL" || vu == "ETHERNET" || vu == "BOTH") {
       KeyerOut = vu;
     } else {
-      setParseError("Keyer Out", v, "must be 'Local' or 'Ethernet'");
+      setParseError("Keyer Out", v, "must be 'Local', 'Ethernet', or 'Both'");
       return;
     }
     return;

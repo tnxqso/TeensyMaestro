@@ -34,7 +34,9 @@ void TM_KeyerAdapter::stopPTT() {
 }
 
 void TM_KeyerAdapter::keyImmediate(bool down) {
-  if (KeyerOut == "LOCAL") {
+  // WinKeyer immediate commands usually target the physical port.
+  // We allow this for LOCAL and BOTH.
+  if (KeyerOut == "LOCAL" || KeyerOut == "BOTH") {
     digitalWrite(TM_WK_KEYOUT_PIN, down ? HIGH : LOW);
   }
 }

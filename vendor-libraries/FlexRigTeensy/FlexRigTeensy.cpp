@@ -246,6 +246,50 @@ FLASHMEM void FlexRig::fireEvents()
     slice[i].fireEvents();
 }
 
+// Enable/disable TX debug
+#ifndef FLEXRIG_TX_DEBUG
+#define FLEXRIG_TX_DEBUG 0
+#endif
+
+#if FLEXRIG_TX_DEBUG
+static bool flexrigIsSpotAdd(const char* s)
+{
+  if (!s) return false;
+
+  // Skip leading whitespace
+  while (*s == ' ' || *s == '\t') ++s;
+
+  // Check "spot add" prefix
+  return (strncmp(s, "spot add", 8) == 0);
+}
+
+static void flexrigDebugPrintEscaped(const char* prefix, const char* s)
+{
+  Serial.print(prefix);
+  for (const char* p = s; p && *p; ++p)
+  {
+    char c = *p;
+    if (c == '\r') Serial.print("\\r");
+    else if (c == '\n') Serial.print("\\n");
+    else if (c == '\t') Serial.print("\\t");
+    else Serial.print(c);
+  }
+  Serial.println();
+}
+
+static void flexrigDebugHexDump(const char* prefix, const uint8_t* data, size_t len)
+{
+  Serial.print(prefix);
+  for (size_t i = 0; i < len; i++)
+  {
+    if (data[i] < 0x10) Serial.print('0');
+    Serial.print(data[i], HEX);
+    Serial.print(' ');
+  }
+  Serial.println();
+}
+#endif
+
 FLASHMEM void FlexRig::send(String cmd)
 {
   send(cmd, 0);
@@ -258,33 +302,43 @@ FLASHMEM void FlexRig::send(const char* cmd)
 
 FLASHMEM int FlexRig::send(String cmd, int parserId)
 {
-  // Build the wire line safely without fixed-size stack buffers.
-  // Format expected by the radio: "C<id>|<cmd>\n"
+  // Build wire line: "C<id>|<cmd>\n" (but don't double-append '\n')
   String line;
-  line.reserve(cmd.length() + 16);   // Reserve enough space for ID, separators, and newline
+  line.reserve(cmd.length() + 16);
   line += 'C';
-  line += C++;                       // Append current command ID, then increment it
+  line += C++;
   line += '|';
   line += cmd;
-  line += '\n';
 
-  // Register this command so the corresponding reply can be routed to the right parser.
-  addToResponseList(C - 1, parserId);
+  if (line.length() == 0 || line[line.length() - 1] != '\n')
+    line += '\n';
 
-  // Send atomically with interrupts disabled to avoid ISR interleaving during socket I/O.
+  const int sentId = C - 1;
+  addToResponseList(sentId, parserId);
+
+#if FLEXRIG_TX_DEBUG
+  // Suppress logging for "spot add ..."
+  if (!flexrigIsSpotAdd(cmd.c_str()))
+  {
+    Serial.printf("[FlexRig TX] id=%d parserId=%d len=%u\n",
+                  sentId, parserId, (unsigned)line.length());
+    flexrigDebugPrintEscaped("  ascii: ", line.c_str());
+    flexrigDebugHexDump("  hex:   ", (const uint8_t*)line.c_str(), line.length());
+  }
+#endif
+
   noInterrupts();
   client.print(line);
   interrupts();
 
-  // Return the command ID that was just sent.
-  return C - 1;
+  return sentId;
 }
 
 FLASHMEM int FlexRig::send(const char* cmd, int parserId)
 {
   if (!cmd) return -1;
 
-  size_t cmdLen = strlen(cmd);
+  const size_t cmdLen = strlen(cmd);
 
   String line;
   line.reserve(cmdLen + 16);
@@ -292,15 +346,28 @@ FLASHMEM int FlexRig::send(const char* cmd, int parserId)
   line += C++;
   line += '|';
   line += cmd;
-  line += '\n';
 
-  addToResponseList(C - 1, parserId);
+  if (line.length() == 0 || line[line.length() - 1] != '\n')
+    line += '\n';
+
+  const int sentId = C - 1;
+  addToResponseList(sentId, parserId);
+
+#if FLEXRIG_TX_DEBUG
+  if (!flexrigIsSpotAdd(cmd))
+  {
+    Serial.printf("[FlexRig TX] id=%d parserId=%d len=%u\n",
+                  sentId, parserId, (unsigned)line.length());
+    flexrigDebugPrintEscaped("  ascii: ", line.c_str());
+    flexrigDebugHexDump("  hex:   ", (const uint8_t*)line.c_str(), line.length());
+  }
+#endif
 
   noInterrupts();
   client.print(line);
   interrupts();
 
-  return C - 1;
+  return sentId;
 }
 
 FLASHMEM void FlexRig::setPreampList(char m) {
