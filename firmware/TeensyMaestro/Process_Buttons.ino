@@ -1069,8 +1069,6 @@ void HandleBtnRitSetB()
 
 void HandleBtnSelect()
 {
-  bool CWmode = false;
-
   if (isShortPress(ButtonTime))
   {
     // Short press

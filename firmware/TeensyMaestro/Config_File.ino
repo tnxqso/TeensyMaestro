@@ -1346,24 +1346,21 @@ if (InSetup && InBufUC.indexOf("CW FARNSWORTH:") >= 0) {
     return;
   }
 
-  // CW Paddles: Right | Left  (only these two; preserves W4WKU special case)
+  // CW Paddles: Right | Left
   if (InSetup && InBufUC.indexOf("CW PADDLES:") >= 0) {
-    String v = ParseStringValue(line, "CW Paddles:", Handed);
+    String v = ParseStringValue(line, "CW Paddles:", "Right");
     String vu = v; vu.toUpperCase();
 
     if (vu == "RIGHT") {
       Handed    = 0;
       HandedTxt = "Right Handed";
-      DotPin    = 30;
-      DashPin   = 31;
+      // DotPin and DashPin are NOT changed. They keep their default hardware assignments.
     } else if (vu == "LEFT") {
       Handed    = 1;
       HandedTxt = "Left Handed";
-      DotPin    = 31;
-      DashPin   = 30;
+      // DotPin and DashPin are NOT changed. The swap is handled logically in loop().
     } else {
       setParseError("CW Paddles", v, "must be 'Right' or 'Left'");
-      return;
     }
     return;
   }
