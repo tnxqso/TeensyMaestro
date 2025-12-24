@@ -84,6 +84,7 @@ FLASHMEM void TeensyMaestroSetup()
 {
   debugln(F(TM_FULL_NAME_WITH_VERSION));
 
+  // --- Power Button Configuration ---
   if (PowerBtn == "POWER")
   {
     set_arm_power_button_press_on_time(arm_power_button_press_on_time_50ms);                // 50 ms to hold power button for startup
@@ -101,14 +102,11 @@ FLASHMEM void TeensyMaestroSetup()
     set_arm_power_button_callback(&ShutDownCB);                              // Immediate shut off from on/off button press
   }
 
- 
+  // --- Display Initialization ---
   TM_DisplayBringUp();
   UI_Boot::showInitialBanner();
-  //UI_Boot::showProgress(BootStage::InitNetwork);
-
-    // Start I2C
-
-  // MUX, Button, Name
+  
+  // --- IO Expander / Button Mapping ---
   buttonMap[BTN_NONE]             = { -1, -1, "BTN_NONE" };
   buttonMap[BTN_VFO_A_MUTE_SLICE] = { 0, 0, "BTN_VFO_A_MUTE_SLICE" };
   buttonMap[BTN_VFO_A_RIT_SEL]    = { 0, 1, "BTN_VFO_A_RIT_SEL" };
@@ -146,32 +144,24 @@ FLASHMEM void TeensyMaestroSetup()
   buttonMap[BTN_ACC_8]    = { 2, 14, "BTN_ACC_8" };  // NV0E - Future accessory button
   buttonMap[BTN_ACC_9]    = { 2, 15, "BTN_ACC_9" };  // NV0E - Future accessory button
 
+  // --- Initialize I2C Muxes ---
   debugln("Beginning I2C connection for muxA");
   muxA_found = muxA.begin_I2C(0x20);
   if (muxA_found)
   {
     debugln("  Success connecting to muxA");
-
     for (int i = 0; i < 8; i++)
     {
-      if (muxA_arr[i].gpioDirection == GPIO_INPUT)
-      {
+      if (muxA_arr[i].gpioDirection == GPIO_INPUT) {
         muxA.pinMode(i, INPUT_PULLUP);
-        debug(i);
-        debug(" ");
-        debugln(muxA.digitalRead(i));
-      }
-      else if (muxA_arr[i].gpioDirection == GPIO_OUTPUT)
-      {
+        debug(i); debug(" "); debugln(muxA.digitalRead(i));
+      } else if (muxA_arr[i].gpioDirection == GPIO_OUTPUT) {
         muxA.pinMode(i, OUTPUT);
         muxA.digitalWrite(i, HIGH);  // Turn GPIO to default state
       }
     }
-
     debugln("  GPIOs configured on muxA");
-  }
-  else
-  {
+  } else {
     debugln("  FAILURE connecting to muxA");
   }
 
@@ -182,23 +172,16 @@ FLASHMEM void TeensyMaestroSetup()
     debugln("  Success connecting to muxB");
     for (int i = 0; i < 8; i++)
     {
-      if (muxB_arr[i].gpioDirection == GPIO_INPUT)
-      {
+      if (muxB_arr[i].gpioDirection == GPIO_INPUT) {
         muxB.pinMode(i, INPUT_PULLUP);
-        debug(i);
-        debug(" ");
-        debugln(muxB.digitalRead(i));
-      }
-      else if (muxB_arr[i].gpioDirection == GPIO_OUTPUT)
-      {
+        debug(i); debug(" "); debugln(muxB.digitalRead(i));
+      } else if (muxB_arr[i].gpioDirection == GPIO_OUTPUT) {
         muxB.pinMode(i, OUTPUT);
         muxB.digitalWrite(i, HIGH);  // Turn GPIO to default state
       }
     }
     debugln("  GPIOs configured on muxB");
-  }
-  else
-  {
+  } else {
     debugln("  FAILURE connecting to muxB");
   }
 
@@ -207,32 +190,25 @@ FLASHMEM void TeensyMaestroSetup()
   if (muxC_found)
   {
     debugln("  Success connecting to muxC");
-    for (int i = 0; i < 16; i++)  // NV0E - Change to 16 for MCP23017 expander
+    for (int i = 0; i < 16; i++)
     {
-      if (muxC_arr[i].gpioDirection == GPIO_INPUT)
-      {
+      if (muxC_arr[i].gpioDirection == GPIO_INPUT) {
         muxC.pinMode(i, INPUT_PULLUP);
-        debug(i);
-        debug(" ");
-        debugln(muxC.digitalRead(i));
-      }
-      else if (muxC_arr[i].gpioDirection == GPIO_OUTPUT)
-      {
+        debug(i); debug(" "); debugln(muxC.digitalRead(i));
+      } else if (muxC_arr[i].gpioDirection == GPIO_OUTPUT) {
         muxC.pinMode(i, OUTPUT);
         muxC.digitalWrite(i, HIGH);  // Turn GPIO to default state
       }
     }
     debugln("  GPIOs configured on muxC");
-  }
-  else
-  {
+  } else {
     debugln("  FAILURE connecting to muxC");
   }
 
-
+  // --- Network Setup ---
   getIpAddress();  // Will get DHCP address or fixed ip if no DHCP address is served
 
-  // --- Run STUN only for Fixed / Fixed+Failover, and only if target is off-LAN ---
+  // Run STUN only for Fixed / Fixed+Failover, and only if target is off-LAN
   auto sameSubnet = [](const IPAddress &a, const IPAddress &b, const IPAddress &mask) {
     for (int i = 0; i < 4; ++i) if ( (a[i] & mask[i]) != (b[i] & mask[i]) ) return false;
     return true;
@@ -258,31 +234,11 @@ FLASHMEM void TeensyMaestroSetup()
     debugln("Connection mode uses discovery -> STUN skipped.");
   }
 
-    TM_AttemptFlexConnect();
+  // --- Attempt to Connect to Radio ---
+  TM_AttemptFlexConnect();
 
-  if (fRig.connected)
-  {
-    debugln("Connected");
-
-    TimeIt = millis();
-    while ((millis() - TimeIt) < 2000)  //simulating main loop
-    {
-      //fRig.fireEvents();
-      fRig.process();  //and processing intial rig data
-      delay(100);
-    }
-
-    //Configuring Events
-    configureRadioEvents();
-    configureEqEvents();
-    configureInterlockEvents();
-    configureTransmitEvents();
-    configurePanadapterEvents();
-    configureWaterfallEvents();
-    configureSliceEvents();
-
-  }  // end if (fRig.connected)
-  else
+  // If NOT connected, show message on screen
+  if (!fRig.connected)
   {
     StandAlone = true;
     debugln("Not connected to Flex");
@@ -297,6 +253,7 @@ FLASHMEM void TeensyMaestroSetup()
   debug("Mic Sel: ");
   debugln(digitalRead(MicSelPin));
 
+  // --- Initialize VFOs ---
   for (int Slice = 0; Slice < 2; Slice++)
   {
     VFOVal[Slice]            = 0;
@@ -308,107 +265,11 @@ FLASHMEM void TeensyMaestroSetup()
 
   MuteVal[A] = 0;
 
-  if (fRig.connected)
-  {
-    if (!DisableGUIClient)
-    {
-      if (getFirstButtonPress() != BTN_NONE)
-      {
-        GotBtn = true;
-      }
-      else
-      {
-        GotBtn = false;
-      }
-    }
-
-    if (!DisableGUIClient && (GotBtn || fRig.Client_ID[0] == ""))  // held button during t or no GUI client found forces TeensyMaestro to be a GUI Client
-    {
-      //fRig.send("client gui KD0RC_TeensyMaestro");
-      fRig.send("client gui TeensyMaestro-" + TMID);
-      //fRig.send("client station TeensyMaestro-" + TMID);
-      fRig.send("client station TeensyMaestro-" + MyCall);
-
-      TimeIt = millis();
-      while (fRig.Client_ID[0] == "")
-      {
-        fRig.process();
-        delay(100);
-
-        if (millis() - TimeIt > 5000)  // Avoid infinite loop if it does not find a proper client id
-        {
-          break;
-        }
-      }
-
-      fRig.send("client start_persistence 1");
-
-      debugln("Standalone Mode************************************************************");
-      debug("fRig.Client_ID: ");
-      debugln(fRig.Client_ID[0]);
-      debug("fRig.Client_Station: ");
-      debugln(fRig.Client_Station[0]);
-      debug("fRig.Client_Program: ");
-      debugln(fRig.Client_Program[0]);
-
-      fRig.setAgcThreshold(A, 33);
-      fRig.setAgcThreshold(B, 33);
-      fRig.setAudioGain(A, 20);
-      fRig.setAudioGain(B, 20);
-    }
-    else
-    {
-      debugln("NOT Standalone Mode************************************************************");
-      debug("fRig.Client_ID: ");
-      debugln(fRig.Client_ID[0]);
-      fRig.send("client bind client_id=" + String(fRig.Client_ID[0]));
-    }
-
-    TimeIt = millis();
-    do
-    {
-      //fRig.fireEvents();
-      fRig.process();
-
-      if (millis() - TimeIt > 5000)
-      {
-        break;
-      }
-      delay(250);
-
-    } while (fRig.slice[A].mode == "");
-
-    debug("Slice A in use: ");
-    debugln(fRig.slice[A].in_use);
-    debug("Slice B in use: ");
-    debugln(fRig.slice[B].in_use);
-
-    if (Profile != "")
-    {
-      // Use the dedicated API; same async behavior as before
-      fRig.loadGlobalProfile(Profile);
-    }
-
-    TimeIt = millis();
-    while ((millis() - TimeIt) < 1000)
-    {
-      fRig.process();  // processing intial rig data
-      delay(100);
-    }
-
-    for (int Slice = 0; Slice < 2; Slice++)
-    {
-      if (fRig.slice[Slice].active == 1)
-      {
-        LoadFilterMenu(fRig.slice[Slice].mode);
-      }
-    }
-    LoadProfileMenu();
-  }
-
-
+  // --- Load Settings from EEPROM ---
   GetEEPROM();
 
+  // --- Load Menus ---
+  // If connected, load menus that depend on Rig state or defaults
   if (fRig.connected)
   {
     LoadMiscMenu();
@@ -419,12 +280,15 @@ FLASHMEM void TeensyMaestroSetup()
     LoadAntennaMenu();
     LoadClientMenu();
   }
-
-  //LoadCWMenu();
+  
+  // Load CW menus (these are local to the keyer or messages)
   LoadCWMsgMenu();
   LoadCWMenu();
 
-  // ---------------------------------------------------------------------------------------------
+  // =============================================================================================
+  // Main Connection Initialization
+  // This block handles binding, events, and initial state sync.
+  // =============================================================================================
   if (fRig.connected)
   {
     debugln("fRig.connected is True");
@@ -445,12 +309,14 @@ FLASHMEM void TeensyMaestroSetup()
     configureWaterfallEvents();
     configureSliceEvents();
 
-    // Decide GUI vs bound client
+    // --- Decide: GUI Client vs Bound Client ---
     if (!DisableGUIClient)
     {
       GotBtn = (getFirstButtonPress() != BTN_NONE);
     }
-    if (!DisableGUIClient && (GotBtn || fRig.Client_ID[0] == ""))  // be a GUI client
+    
+    // Force GUI client if button held or no ID yet
+    if (!DisableGUIClient && (GotBtn || fRig.Client_ID[0] == ""))
     {
       fRig.send("client gui TeensyMaestro-" + TMID);
       fRig.send("client station TeensyMaestro-" + MyCall);
@@ -464,7 +330,7 @@ FLASHMEM void TeensyMaestroSetup()
       }
       fRig.send("client start_persistence 1");
 
-      debugln("Standalone Mode************************************************************");
+      debugln("Standalone Mode (GUI Client)****************************************");
       debug("fRig.Client_ID: ");      debugln(fRig.Client_ID[0]);
       debug("fRig.Client_Station: "); debugln(fRig.Client_Station[0]);
       debug("fRig.Client_Program: "); debugln(fRig.Client_Program[0]);
@@ -476,12 +342,13 @@ FLASHMEM void TeensyMaestroSetup()
     }
     else
     {
-      debugln("NOT Standalone Mode************************************************************");
+      debugln("NOT Standalone Mode (Bound Client)**********************************");
+      // Only bind ONCE here to avoid audio routing issues
       debug("fRig.Client_ID: "); debugln(fRig.Client_ID[0]);
       fRig.send("client bind client_id=" + String(fRig.Client_ID[0]));
     }
 
-    // Give slice list a moment to populate
+    // --- Wait for Slices to Populate ---
     TimeIt = millis();
     do
     {
@@ -493,7 +360,7 @@ FLASHMEM void TeensyMaestroSetup()
     debug("Slice A in use: "); debugln(fRig.slice[A].in_use);
     debug("Slice B in use: "); debugln(fRig.slice[B].in_use);
 
-    // Load requested global profile if any
+    // --- Load Global Profile (if configured) ---
     if (Profile != "")
     {
       String TmpStr = "profile global load \"" + Profile + "\"";
@@ -507,7 +374,7 @@ FLASHMEM void TeensyMaestroSetup()
       delay(100);
     }
 
-    // Load filter menu for any active slices
+    // --- Load Filter Menus for active slices ---
     for (int s = 0; s < 2; ++s)
     {
       if (fRig.slice[s].active == 1)
@@ -517,7 +384,7 @@ FLASHMEM void TeensyMaestroSetup()
     }
     LoadProfileMenu();
 
-    // ----------------------- NO ORPHAN/WEIRD SLICE -----------------------
+    // ----------------------- NO ORPHAN/WEIRD SLICE CHECK -----------------------
     // Never fabricate slices in headless mode; and even when not headless, do not auto-create.
     if (FlexIsHeadless()) {
       debugln(F("Headless: skip creating any slices (no orphan/weird slice)."));
@@ -558,6 +425,7 @@ FLASHMEM void TeensyMaestroSetup()
       }
     }
 
+    // Wait until Client ID is fully populated
     TimeIt = millis();
     while (fRig.Client_ID[0] == "")
     {
@@ -570,23 +438,13 @@ FLASHMEM void TeensyMaestroSetup()
     CheckInBand(A);
     CheckInBand(B);
 
-    // Fix RF power display glitch only if real slices exist
-    bool haveAnySlice = (fRig.slice[A].in_use == 1) || (fRig.slice[B].in_use == 1);
-    if (haveAnySlice)
-    {
-      if (fRig.slice[A].tx == 1) {
-        debugln("TX*******************************************************************");
-        fRig.setTx(A, 0); fRig.process(); delay(100); fRig.setTx(A, 1);
-      } else if (fRig.slice[B].tx == 1) {
-        fRig.setTx(B, 0); fRig.process(); delay(100); fRig.setTx(B, 1);
-      } else if (fRig.slice[A].in_use == 1) {
-        fRig.setTx(A, 1); fRig.process(); delay(100); fRig.setTx(A, 0);
-      } else if (fRig.slice[B].in_use == 1) {
-        fRig.setTx(B, 1); fRig.process(); delay(100); fRig.setTx(B, 0);
-      }
-    } else {
-      debugln(F("Skip TX toggle: no real slices present"));
-    }
+    // *******************************************************************
+    // REMOVED: "Fix RF power display glitch" / TX Toggle
+    // The previous code toggled TX on/off here which caused SideTone 
+    // to disappear on some radios because it disabled Monitor.
+    // We now skip this toggle to ensure side tone reliability.
+    // *******************************************************************
+    debugln(F("Setup: TX Toggle skipped to preserve SideTone."));
 
     // Pan IDs may be zero/invalid early; print safely
     auto _safePrintPan = [&](const char* label, int panId){
@@ -617,35 +475,10 @@ FLASHMEM void TeensyMaestroSetup()
 
     attachInterrupt(digitalPinToInterrupt(MicSelPin), MicSelISR, CHANGE);
 
+    // --- Initialize Encoders based on Current Settings ---
       switch (Encoder_9)
       {
       case Enc9_CWSpeed: {
-        /*
-        const bool headless = FlexIsHeadless();
-        const int  tx       = TXSlice;
-        const String mode   = (tx >= 0) ? fRig.slice[tx].mode : String("");
-        const bool isCW     = (mode == "CW");
-        int reported        = fRig.transmit.speed;
-
-        //Serial.println("[Setup] Enc9_CWSpeed init");
-        //Serial.print  ("[Setup] headless="); Serial.println(headless ? "YES" : "NO");
-        //Serial.print  ("[Setup] txSlice=");  Serial.println(tx);
-        //Serial.print  ("[Setup] mode=");     Serial.println(mode);
-        //Serial.print  ("[Setup] reported="); Serial.println(reported);
-
-        // Adopt radio WPM only when not headless, TX slice is CW, and value is sane
-        if (!headless && isCW && reported > 0) {
-          if (reported < 5)  reported = 5;   // clamp
-          if (reported > 60) reported = 60;
-          CWVal = reported;
-          //Serial.print("[Setup] applied CWVal="); Serial.println(CWVal);
-        } else {
-          //Serial.println("[Setup] keep local CWVal (no adopt)");
-        }
-
-        CWValSave = CWVal;
-        CWMicEnc.write(CWVal * CWEncSteps);
-        */
         CWMicEnc.write(CWVal * CWEncSteps);
         break;
       }
@@ -731,19 +564,19 @@ FLASHMEM void TeensyMaestroSetup()
   else  // Not connected -> stand-alone keyer
   {
     StandAlone = true;
-    debugln("Not connected to Flex");
+    debugln("Not connected to Flex (StandAlone Keyer mode)");
     Keyer_Apply_Wpm(CWVal /* already set from INI */, false);
     UI_Boot::Prog(BootStage::InitNetwork, "Not connected to Flex");
   } // End if ftRig.Connected
+
+  // ---------------------------------------------------------------------------------------------
+  // Final Hardware Init (Touch / Sensors)
   // ---------------------------------------------------------------------------------------------
 
   touch.begin();
-
   touch.setRotation(3);  // Match TFT rotation for landscape mode (same axes as screen)
-                         // rotation=3: Origin bottom-right in raw terms, but library maps so X→right, Y→down to match TFT
-
+  
   touch.readData(&TPX, &TPY, &TPZ);
-
   if (TPX == 4095 && TPY == 0 && TPZ == 255)  // Trick value to show that no controller is connected
   {
     debugln("No XPT2046 Touch Controller Detected");
@@ -757,10 +590,8 @@ FLASHMEM void TeensyMaestroSetup()
 
   SplashTimeIt    = millis();
   ScreenSaveTimer = millis();
-
-  TempTimer = millis();
-
-  QueryTimer = millis();
+  TempTimer       = millis();
+  QueryTimer      = millis();
 
   Accel.begin(VFOAccelISR, 2000);  // 2 ms Timer
 
@@ -768,6 +599,7 @@ FLASHMEM void TeensyMaestroSetup()
 }  // end TeensyMaestroSetup()
 
 
+// --- Helper Callback for Shutdown ---
 FLASHMEM void ShutDownCB()
 {
   for (int i = 0; i < fRig.nMaxSlice; i++)
@@ -785,6 +617,8 @@ FLASHMEM void ShutDownCB()
   fRig.disconnect();
   delay(1000);
 }
+
+// --- Helper for Network Connection ---
 FLASHMEM void TM_AttemptFlexConnect()
 {
   if (Ethernet.linkStatus() != 1) {
