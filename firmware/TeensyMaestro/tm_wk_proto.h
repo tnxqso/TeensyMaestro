@@ -153,6 +153,7 @@ public:
   void onProtoClosed() FLASHMEM;      
 
 private:
+  uint8_t _lastHostImmediateWpm = 0xFF;
   static TM_WK_Protocol* s_active;
 
   TM_IKeyer&      _k;

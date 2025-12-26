@@ -31,12 +31,13 @@ public:
   virtual size_t enqueueText(const char* text, size_t len) = 0;
 
   // Speed controls
-  virtual void setWpm(uint8_t wpm) = 0;
+  virtual void setWpm(uint8_t wpm) = 0;          // Buffered (Queued)
+  virtual void setWpmImmediate(uint8_t wpm) = 0; // NEW: Immediate (Direct)
   virtual uint8_t getWpm() const = 0;
 
   // Weight, ratio, sidetone
-  virtual void setWeightPermille(uint16_t per_mille) = 0; // 1000 equals 100 percent
-  virtual void setDitDahRatio(uint8_t ratio) = 0;         // see WinKey docs
+  virtual void setWeightPermille(uint16_t per_mille) = 0; 
+  virtual void setDitDahRatio(uint8_t ratio) = 0;         
   virtual void setSidetone(bool on) = 0;
   
   // Pro Features (K3NG / WinKeyer 2)
@@ -47,8 +48,6 @@ public:
   // Status
   virtual bool isBusy() const = 0;
   virtual bool isPaddlePressed() const = 0;
-
-  // Returns true while the carrier/key line is asserted (element down).
   virtual bool isKeyDown() const = 0;
 
   // Returns how many bytes are currently queued in the keyer's own TX queue.
@@ -56,11 +55,7 @@ public:
   virtual uint16_t txqCapacityBytes() const = 0;
 
   virtual void keyImmediate(bool down) = 0;  // Manual key line control
-
-  // Hard abort: stop any in-progress element/timers immediately.
   virtual void abortNow() = 0;
-
-  // Flush any queued downstream text immediately
   virtual void clearTextQueue() = 0;
 };
 
@@ -75,6 +70,7 @@ public:
   size_t enqueueText(const char* text, size_t len) override;
 
   void setWpm(uint8_t wpm) override;
+  void setWpmImmediate(uint8_t wpm) override; // NEW
   uint8_t getWpm() const override;
 
   void setWeightPermille(uint16_t per_mille) override;

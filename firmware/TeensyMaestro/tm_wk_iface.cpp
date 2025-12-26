@@ -7,6 +7,13 @@
 
   A community-maintained edition with open-source utilities
   for ham radio enthusiasts, focusing on FlexRadio® and Wavelog integrations.
+
+  Based on the original TeensyMaestro by Len Koppl (KD0RC),
+  which integrates the FlexRadio 6000 library by IW7DMH.
+  Portions of this work remain © Len Koppl and © IW7DMH as noted.
+
+  See LICENSE for full license text and NOTICE for attributions.
+  Creative Commons BY-NC-SA 3.0: https://creativecommons.org/licenses/by-nc-sa/3.0/
 */
 
 #include "tm_wk_iface.h"
@@ -34,9 +41,7 @@ void TM_KeyerAdapter::stopPTT() {
 }
 
 void TM_KeyerAdapter::keyImmediate(bool down) {
-  // WinKeyer immediate commands usually target the physical port.
-  // We allow this for LOCAL and BOTH.
-  if (KeyerOut == "LOCAL" || KeyerOut == "BOTH") {
+  if (KeyerOut == "LOCAL") {
     digitalWrite(TM_WK_KEYOUT_PIN, down ? HIGH : LOW);
   }
 }
@@ -81,8 +86,14 @@ uint8_t TM_KeyerAdapter::getWpm() const {
   return g_keyerEngine.getWpm();
 }
 
+// Buffered Speed Change (via Queue)
 void TM_KeyerAdapter::setWpm(uint8_t wpm) {
   g_keyerEngine.enqueueWpm(wpm);
+}
+
+// Immediate Speed Change (Direct to Engine)
+void TM_KeyerAdapter::setWpmImmediate(uint8_t wpm) {
+  g_keyerEngine.setWpm(wpm);
 }
 
 void TM_KeyerAdapter::setWeightPermille(uint16_t per_mille) {

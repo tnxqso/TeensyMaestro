@@ -15,14 +15,13 @@
 extern "C" void* extmem_malloc(size_t size);
 extern "C" void  extmem_free(void* ptr);
 
-// C hook: Echo char to host
+// C hooks
 extern "C" void WK_OnCharEcho(uint8_t ch) {
   if (TM_WK_Protocol::active()) {
     TM_WK_Protocol::active()->onKeyerCharEcho(ch);
   }
 }
 
-// C Hook: Paddle Activity (Break-in)
 extern "C" void WK_OnPaddleActivity(bool active) {
   if (TM_WK_Protocol::active()) {
     TM_WK_Protocol::active()->onPaddleActivity(active);
@@ -139,7 +138,7 @@ FLASHMEM void TM_WK_Protocol::setLocalBaseline(uint8_t wpm) {
 // === PADDLE ACTIVITY HANDLER ===
 FLASHMEM void TM_WK_Protocol::onPaddleActivity(bool active) {
     if (_w) {
-        // Send a status byte immediately (usually 0xC0 or 0xC2/C1 based on buildStatusByte)
+        // Send a status byte immediately
         uint8_t s = buildStatusByte();
         _w->writeByte(s);
         _lastStatusSent = s; 
@@ -498,15 +497,16 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       uint8_t w = p;
       if (w < TM_WK_WPM_MIN) w = TM_WK_WPM_MIN;
       if (w > TM_WK_WPM_MAX) w = TM_WK_WPM_MAX;
-      setWpmProvenance(w, WpmOrigin::HostImmediate, F("host <02>"));
+      
+      // FIX: Track this value so poll() knows it came from host
+      _lastHostImmediateWpm = w;
+      
+      // Use NEW immediate method
+      _k.setWpmImmediate(w); 
+      
       _armedSpeedValid = false;
-      recordHostSetWpm(w);
-#if WK_RX_TRACE
-      WK_DEBUGF("DBG: RX_CTL <02><%02X>  (SetWPM)\n", (unsigned)p);
-#endif
-#if WK_INFO_TRACE
-      WK_DEBUGF("WK: setWpm=%u [immediate]\n", (unsigned)w);
-#endif
+      // Note: We intentionally do NOT call recordHostSetWpm() here in the same way 
+      // because we don't want to trigger the "Local Change" logic in poll().
       break;
     }
 
@@ -530,7 +530,7 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       break;
     }
     
-    // Pro Features
+    // Pro Features (Implemented)
     case WK_CMD_SET_COMP: {
        _k.setKeyCompensation(p);
        break; 
@@ -557,8 +557,9 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       uint8_t hostMin   = _immBuf[0];
       uint8_t hostRange = _immBuf[1];
 
-      if (hostMin < 5)   hostMin = 5;
-      if (hostMin > 99)  hostMin = 99;
+      // FIX: Proper indentation for single-line ifs to suppress warnings
+      if (hostMin < 5) hostMin = 5; 
+      if (hostMin > 99) hostMin = 99;
 
       if (hostRange < 1) hostRange = 1;
       if (hostRange > 99) hostRange = 99;
@@ -592,6 +593,8 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
     case WK_CMD_SET_OUTPUTS: {
       break;
     }
+    
+    // WK_CMD_SET_COMP duplicate removed
 
     default:
 #if WK_INFO_TRACE
@@ -772,7 +775,15 @@ FLASHMEM void TM_WK_Protocol::poll() {
         (_lastWpmOrigin == WpmOrigin::BufferedApplyAscii ||
         _lastWpmOrigin == WpmOrigin::BufferedApplyIdle);
 
-    const bool localChange = !(hostRecentlyDrove || macroSpeed);
+    // FIX: Enhanced Filter
+    bool isQueueExecution = (_armedSpeedValid && _armedSpeedWpm == cur) || 
+                            (_lastArmLogWpm == cur);
+    
+    // Also check if it matches the last IMMEDIATE command we sent
+    bool isImmediate = (_lastHostImmediateWpm == cur);
+
+    const bool localChange = !isQueueExecution && !isImmediate; // Strict filter
+    
 
     if (localChange) {
       if (_hostOpen && _w) {
