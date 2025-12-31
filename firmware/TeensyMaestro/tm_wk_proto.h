@@ -153,6 +153,8 @@ public:
   void onProtoClosed() FLASHMEM;      
 
 private:
+  bool     _potStatusPending = false;
+  uint8_t  _pendingPotStatusWpm = 0;
   uint8_t _lastHostImmediateWpm = 0xFF;
   static TM_WK_Protocol* s_active;
 

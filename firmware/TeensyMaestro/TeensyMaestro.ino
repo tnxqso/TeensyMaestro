@@ -1156,7 +1156,6 @@ FLASHMEM void setup()
   GetConfigFile();
 
   TM_WK_Bridge::beginFromConfig();
-  TM_WK_TraceBegin();
   delay(StartUpDelay);
 
   TM_RCS::begin();   // Start remote command TCP server if enabled in config
@@ -1176,6 +1175,8 @@ FLASHMEM void setup()
     // Optional: set priority if needed (0..255, lower = higher priority on some Teensy cores)
     // Accel.priority(128);
   }
+
+  TM_WK_TraceBegin();
 
   g_systemReady = true;
   debugln("Leaving Setup");

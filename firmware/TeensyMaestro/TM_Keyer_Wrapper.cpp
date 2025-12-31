@@ -75,17 +75,36 @@ static const int Enc9_CWSpeed = 0;
 static const int Enc9_RFPower = 2;
 static const int Enc9_Band    = 8;
 
+// Tracks the last speed set by the Host to prevent echo loops
+int g_lastHostWpm = -1;
+
+// --- INTERRUPT SAFETY GLOBALS ---
+// Used to defer network calls from ISR to Main Loop
+volatile bool g_pendingNetKey = false;
+volatile int  g_pendingNetKeyState = 0;
+
 // ============================================================
 // ENGINE CALLBACKS
 // ============================================================
 
 // Callback: WPM Changed by Macro/Host
 void Engine_Wpm_Callback(uint8_t newWpm) {
+    // FIX: Clamp incoming WPM immediately.
+    newWpm = TMU_ClampWpm(newWpm);
+
+    // 1. Save this CLAMPED value so we don't echo it back later
+    g_lastHostWpm = newWpm;
+
+    // 2. Update internal state
     CWVal = newWpm;
     WPM = newWpm;
+    
+    // 3. Update Encoder logic
     if (Encoder_9 == Enc9_CWSpeed) {
         CWMicEnc.write(CWVal * CWEncSteps);
     }
+    
+    // 4. Update Display
     if (Encoder_9 == Enc9_CWSpeed || Encoder_9 == Enc9_RFPower || Encoder_9 == Enc9_Band) {
         DispCWSpeed();
     }
@@ -94,25 +113,20 @@ void Engine_Wpm_Callback(uint8_t newWpm) {
 // Callback: PTT State Changed
 void Engine_Ptt_Callback(bool on) {
     // This callback should NOT trigger network PTT for local keying.
-    // Local keying relies on the radio's VOX or Break-in from the KeyOutPin.
-    // It is only used for rigs that need a separate PTT line asserted before keying.
     if (KeyerOut == "LOCAL") {
-        // If your setup requires a separate PTT line for a local rig,
-        // you would control that GPIO pin here.
-        // DoRigPTT() sends a network command, which is incorrect for LOCAL mode.
-        // Therefore, we do nothing.
+        // No action for LOCAL mode PTT here.
     }
 }
 
-// Callback: Key State Changed
+// Callback: Key State Changed (CALLED FROM INTERRUPT)
 void Engine_Key_Callback(bool on) {
   
-  // 1. Audio and UI (Always active for practice, regardless of mode)
+  // 1. Audio and UI (Always active for practice)
   KeyDown = on; 
   if (on) {
       if (!OldKeyDown) OldKeyDown = true;
       
-      // Sidetone Logic: Should always work if SideTone is enabled
+      // Sidetone Logic
       if (SideTone) { 
           unsigned int safeFreq = (STFreq < 200) ? 800 : STFreq;
           tone(LOCAL_STPin, safeFreq);
@@ -124,38 +138,16 @@ void Engine_Key_Callback(bool on) {
 
   // Handle LOCAL physical keying (Local OR Both)
   if (KeyerOut == "LOCAL" || KeyerOut == "BOTH") {
-      // Toggle the physical keying pin.
       digitalWrite(LOCAL_KeyOutPin, on ? HIGH : LOW);
   }
 
   // Handle ETHERNET network keying (Ethernet OR Both)
   if (KeyerOut == "ETHERNET" || KeyerOut == "BOTH") {
-      // For ETHERNET, we must be connected and in the correct mode to send commands.
-      if (g_fRig && g_fRig->connected) {
-          int txSlice = -1;
-          for (int s = 0; s < g_fRig->nMaxSlice; ++s) {
-              if (g_fRig->slice[s].tx == 1 && g_fRig->slice[s].in_use == 1) {
-                  txSlice = s;
-                  break;
-              }
-          }
-
-          // Safety Guard: Only send network command if in CW mode with break-in enabled.
-          // If conditions are not met, we do nothing (sidetone continues for practice).
-          if (txSlice >= 0 && g_fRig->slice[txSlice].mode == "CW" && g_fRig->transmit.break_in == 1) {
-              char buf[128];
-              int keyState = on ? 1 : 0;
-              snprintf(buf, sizeof(buf), "cw key %d time=0x%X index=%u client_handle=%s", 
-                  keyState,
-                  (unsigned)(millis() % 0xFFFF), 
-                  (unsigned)CWIndex++, 
-                  g_fRig->Client_Handle[ClientMenuItem].c_str());
-
-              g_fRig->send(buf);
-          }
-      }
+      // CRITICAL FIX: DO NOT CALL NETWORK SEND FROM INTERRUPT!
+      // We set a flag, and let KeyerLoop() handle the actual TCP send.
+      g_pendingNetKeyState = on ? 1 : 0;
+      g_pendingNetKey = true;
   }
-
 }
 
 // Callback: Character Sent (Echo back to host)
@@ -188,7 +180,7 @@ void KeyerSetup() {
   // 2. Initialize the Engine
   g_keyerEngine.begin();
   
-  // 3. Attach Callbacks (Now local to this file!)
+  // 3. Attach Callbacks
   g_keyerEngine.attachKeyCallback(Engine_Key_Callback);
   g_keyerEngine.attachPttCallback(Engine_Ptt_Callback);
   g_keyerEngine.attachWpmChangeCallback(Engine_Wpm_Callback);
@@ -222,6 +214,21 @@ void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline)
 {
   newWpm = TMU_ClampWpm(newWpm); 
 
+  // FIX: Anti-feedback loop logic for RumLogNG
+  if (!preserveBaseline && newWpm == g_lastHostWpm) {
+      CWVal = newWpm;
+      WPM = newWpm;
+      
+      if (Encoder_9 == Enc9_CWSpeed) {
+        CWMicEnc.write(CWVal * CWEncSteps);
+      }
+      return; 
+  }
+
+  if (!preserveBaseline && newWpm != g_lastHostWpm) {
+       g_lastHostWpm = -1; 
+  }
+
   CWVal = newWpm;
   
   if (!preserveBaseline) {
@@ -252,8 +259,34 @@ void Keyer_AbortNow(void) {
     g_keyerEngine.abortNow();
 }
 
+// THIS IS CALLED FROM MAIN LOOP (SAFE FOR NETWORK)
 void KeyerLoop() {
-  // Stub
+  if (g_pendingNetKey) {
+      // Process deferred network keying
+      g_pendingNetKey = false;
+      int keyState = g_pendingNetKeyState;
+
+      if (g_fRig && g_fRig->connected) {
+          int txSlice = -1;
+          for (int s = 0; s < g_fRig->nMaxSlice; ++s) {
+              if (g_fRig->slice[s].tx == 1 && g_fRig->slice[s].in_use == 1) {
+                  txSlice = s;
+                  break;
+              }
+          }
+
+          if (txSlice >= 0 && g_fRig->slice[txSlice].mode == "CW" && g_fRig->transmit.break_in == 1) {
+              char buf[128];
+              snprintf(buf, sizeof(buf), "cw key %d time=0x%X index=%u client_handle=%s", 
+                  keyState,
+                  (unsigned)(millis() % 0xFFFF), 
+                  (unsigned)CWIndex++, 
+                  g_fRig->Client_Handle[ClientMenuItem].c_str());
+
+              g_fRig->send(buf);
+          }
+      }
+  }
 }
 
 // --- MACRO IMPLEMENTATION ---

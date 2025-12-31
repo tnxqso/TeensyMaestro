@@ -7,7 +7,7 @@
     <millis> TX <hh>
 
   Notes:
-  - Uses small fixed buffers, no dynamic allocation.
+  - Uses small fixed buffers, no dynamic allocation for line buffering.
   - If SD/file open fails, tracing silently disables itself.
 */
 
@@ -16,15 +16,20 @@
 #if TM_WK_TRACE_SD
 
 #include <SD.h>
+#include "tm_config.h" // Access to TM_VERSION
+#include "tm_time.h"   // Access to TMTime_strftime, TMTime_nowUTC, etc.
 
-// Provided elsewhere in the project (you showed the implementation).
+// Provided elsewhere in the project.
 extern bool TM_SD_Ensure();
 
 static File g_wkTraceFile;
 static bool g_traceOk = false;
 
+// Constant for filename to avoid hardcoding strings in multiple places
+static const char* kTraceFilename = "WK_TRACE.LOG";
+
 // Small fixed buffer to avoid RAM growth.
-static char   g_line[24]; // enough for "1234567890 RX FF\n"
+static char   g_line[32]; // Increased slightly for safety
 static uint32_t g_lastFlushMs = 0;
 
 static inline char hexNib(uint8_t v) {
@@ -39,7 +44,7 @@ static void writeLine(char dir, uint8_t b) {
   // Example: "123456 RX 7F\n"
   const uint32_t ms = millis();
 
-  // Convert ms to decimal (no sprintf).
+  // Convert ms to decimal (no sprintf to save flash/stack).
   char tmp[11];
   uint8_t ti = 0;
   uint32_t x = ms;
@@ -49,7 +54,7 @@ static void writeLine(char dir, uint8_t b) {
   } while (x && ti < sizeof(tmp));
 
   uint8_t i = 0;
-  while (ti > 0) g_line[i++] = tmp[--ti];
+  while (ti > 0 && i < sizeof(g_line) - 10) g_line[i++] = tmp[--ti];
 
   g_line[i++] = ' ';
   g_line[i++] = dir;      // 'R' or 'T'
@@ -77,7 +82,12 @@ void TM_WK_TraceBegin() {
     return;
   }
 
-  g_wkTraceFile = SD.open("WK_TRACE.LOG", FILE_WRITE);
+  // Always start with a fresh file to avoid confusing old data
+  if (SD.exists(kTraceFilename)) {
+      SD.remove(kTraceFilename);
+  }
+
+  g_wkTraceFile = SD.open(kTraceFilename, FILE_WRITE);
   if (!g_wkTraceFile) {
     return;
   }
@@ -85,15 +95,34 @@ void TM_WK_TraceBegin() {
   g_traceOk = true;
   g_lastFlushMs = millis();
 
-  // Write a session separator.
-  const char* hdr = "\n--- WK TRACE SESSION ---\n";
-  g_wkTraceFile.write((const uint8_t*)hdr, strlen(hdr));
+  // --- Write Header ---
+  g_wkTraceFile.println(F("--- WK TRACE SESSION ---"));
+  
+  // 1. Version
+  g_wkTraceFile.print(F("Firmware: "));
+  #ifdef TM_VERSION
+    g_wkTraceFile.println(TM_VERSION);
+  #else
+    g_wkTraceFile.println(F("Unknown"));
+  #endif
+
+  // 2. Timestamp (if NTP is synced)
+  if (TMTime_hasTime()) {
+    char timeBuf[32];
+    // Format: YYYY-MM-DD HH:MM:SS (Uses local timezone if configured in tm_time)
+    TMTime_strftime("%Y-%m-%d %H:%M:%S", timeBuf, sizeof(timeBuf), TMTime_nowUTC());
+    g_wkTraceFile.print(F("Date/Time: "));
+    g_wkTraceFile.println(timeBuf);
+  } else {
+    g_wkTraceFile.println(F("Date/Time: (Not Synced)"));
+  }
+  
+  g_wkTraceFile.println(F("------------------------"));
   g_wkTraceFile.flush();
 }
 
 void TM_WK_TracePoll() {
   // Placeholder: currently we only flush on timer during write.
-  // Keeping this for future expansion (e.g., buffered ring, rotation).
 }
 
 void TM_WK_TraceRX(uint8_t b) { writeLine('R', b); }
