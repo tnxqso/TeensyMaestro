@@ -612,7 +612,46 @@ FLASHMEM void ShutDownCB()
   delay(1000);
 }
 
-// --- Helper for Network Connection ---
+// --------------------------------------------------------------------------
+// Helper: Tries to discover and connect to a specific serial (or ANY if empty).
+// Returns true if connected, false if timed out or interrupted.
+// --------------------------------------------------------------------------
+FLASHMEM bool TM_TryConnectLoop(const char* serialNum, unsigned long timeoutMs) {
+  unsigned long start = millis();
+  
+  // Keep trying until connected, standalone mode is forced, or timeout
+  while (!fRig.connected && !StandAlone) {
+    
+    // 1. Discovery phase
+    if (serialNum && strlen(serialNum) > 0) {
+      // Find specific radio
+      fRig = FlexRig::findAFlex(serialNum);
+    } else {
+      // Find any radio (Auto)
+      fRig = FlexRig::findAFlex(""); 
+    }
+
+    // 2. Connection phase
+    // If discovery found a valid candidate (serial is populated), try to connect
+    if (fRig.serial[0] != 0) { 
+       fRig.connect();
+    }
+
+    // 3. Wait/Timeout phase
+    delay(250);
+
+    if (millis() - start > timeoutMs) {
+      return false; // Timed out
+    }
+  }
+
+  // Return final connection state
+  return fRig.connected;
+}
+
+// --------------------------------------------------------------------------
+// Main Connection Routine
+// --------------------------------------------------------------------------
 FLASHMEM void TM_AttemptFlexConnect()
 {
   if (Ethernet.linkStatus() != 1) {
@@ -650,15 +689,16 @@ FLASHMEM void TM_AttemptFlexConnect()
     CFG_ConnMode==TM_CONN_FIXED_FAILOVER ? "Fixed+Failover" : "Auto");
   debug("CFG_FlexHost = '"); debug(CFG_FlexHost); debugln("'");
 
-  // -----------------------------
-  // A: ANY (try Fixed/Failover direct connect first, then discovery if needed)
-  // -----------------------------
+  // =========================================================================================
+  // Case A: ANY (Configured for Auto, Fixed, or Fixed+Failover)
+  // =========================================================================================
   if (ConnectSerialNum == "ANY") {
     ShowConnModeProgress();
 
     bool tried_direct = false;
     bool direct_ok    = false;
 
+    // 1. Try Direct Connect (TCP) if Fixed or Fixed+Failover
     if (CFG_ConnMode == TM_CONN_FIXED || CFG_ConnMode == TM_CONN_FIXED_FAILOVER) {
       // Resolve target IP from CFG_FlexHost (literal IPv4 or DNS)
       if (TM_ComputeFlexTargetIP()) {
@@ -666,7 +706,6 @@ FLASHMEM void TM_AttemptFlexConnect()
               "Connecting to: %u.%u.%u.%u:%d",
               CFG_FlexIp[0], CFG_FlexIp[1], CFG_FlexIp[2], CFG_FlexIp[3], CFG_FlexControlPort);
 
-        // Keep existing debug output as-is
         debug("Trying direct connect to Flex ");
         debug(CFG_FlexIp[0]); debug(".");
         debug(CFG_FlexIp[1]); debug(".");
@@ -674,22 +713,19 @@ FLASHMEM void TM_AttemptFlexConnect()
         debug(CFG_FlexIp[3]); debug(":");
         debugln(CFG_FlexControlPort);
 
-        // --- Direct connect using your new overload ---
         IPAddress ip(CFG_FlexIp[0], CFG_FlexIp[1], CFG_FlexIp[2], CFG_FlexIp[3]);
         fRig.connect(ip, (uint16_t)CFG_FlexControlPort);
         tried_direct = true;
 
-        // Short wait for the TCP session to become established
+        // Short wait for the TCP session to become established (Direct)
         unsigned long t0 = millis();
         while (!fRig.connected && !StandAlone) {
-          // Some implementations may need one extra nudge; harmless to call once
-          fRig.connect();
+          fRig.connect(); // Harmless re-entry
           delay(250);
           if (millis() - t0 > 8000) break;  // up to ~8 s for direct attempt
         }
         direct_ok = fRig.connected;
 
-        // Fill identity via TCP 'info' when direct connect succeeded
         if (direct_ok) {
           String hostDisp = CFG_FlexHost;
           hostDisp.toLowerCase();
@@ -705,27 +741,20 @@ FLASHMEM void TM_AttemptFlexConnect()
         }
 
       } else {
-        // No usable IP → skip direct attempt
         debugln("No valid Flex target IP (Fixed/Failover); will use discovery if allowed.");
       }
     }
 
-    // Discovery if AUTO, or Fixed+Failover and direct attempt was skipped/failed
+    // 2. Discovery (UDP) if Auto, OR if Fixed+Failover failed above
+    // Note: If mode is strictly FIXED and direct failed, we do NOT enter here (correct behavior).
     if (CFG_ConnMode == TM_CONN_AUTO ||
         (CFG_ConnMode == TM_CONN_FIXED_FAILOVER && (!tried_direct || (tried_direct && !direct_ok)))) {
+      
       UI_Boot::Prog(BootStage::DiscoverFlex, F("Discovering Flex radios..."));
       debugln("===Looking for Flex Rig (UDP)===");
-      fRig = FlexRig::findAFlex("");  // discover any radio
-    }
-
-    // Final connect loop (covers both discovery and the case where direct already succeeded)
-    unsigned long t1 = millis();
-    while (!fRig.connected && !StandAlone) {
-      fRig.connect();
-      delay(250);
-      if (millis() - t1 > 10000) {  // up to ~10 s total
-        break;
-      }
+      
+      // Use helper with 10s timeout, empty string means "Find ANY"
+      TM_TryConnectLoop("", 10000);
     }
 
     if (!fRig.connected) {
@@ -734,30 +763,27 @@ FLASHMEM void TM_AttemptFlexConnect()
     return;
   }
 
-  // -----------------------------
-  // B: Specific serial number → always discovery (original behavior)
-  // -----------------------------
+  // =========================================================================================
+  // Case B: Specific serial number → Always use discovery
+  // =========================================================================================
   {
     UI_Boot::Progf(BootStage::InitNetwork, "Discover SN: %s", ConnectSerialNum.c_str());
 
-    // Keep discovering until the requested serial shows up
-    fRig = FlexRig::findAFlex(ConnectSerialNum.c_str());
+    // Use helper with 10s timeout, looking for specific Serial
+    bool success = TM_TryConnectLoop(ConnectSerialNum.c_str(), 10000);
 
-    while (!fRig.connected) {
-      fRig = FlexRig::findAFlex(ConnectSerialNum.c_str());
-      fRig.connect();
-      delay(250);
-    }
-
-    if (fRig.serial[0] == 0x00) {
-      // No match found through UDP discovery on the local L2 segment
+    // Analyze result
+    if (!success) {
+      // No match found (or timeout)
       StandAlone = true;
 
       debugf(
         "No Flex found via L2 discovery (UDP/4992 broadcast) on local LAN.\n"
+        "Target Serial: %s\n"
         "Our NIC: ip=%u.%u.%u.%u gw=%u.%u.%u.%u mask=%u.%u.%u.%u linkStatus=%d\n"
         "Tips: ensure the radio is powered, same VLAN, and that broadcasts aren’t filtered.\n"
         "If the radio is remote, use Connection mode = Fixed/Failover with Flex Host/Port.\n",
+        ConnectSerialNum.c_str(),
         Ethernet.localIP()[0], Ethernet.localIP()[1],
         Ethernet.localIP()[2], Ethernet.localIP()[3],
         Ethernet.gatewayIP()[0], Ethernet.gatewayIP()[1],
@@ -768,15 +794,15 @@ FLASHMEM void TM_AttemptFlexConnect()
       );
     } else {
       debugln(fRig.serial);
-    }
-
-    // Short final wait to ensure we’re fully connected
-    unsigned long t0 = millis();
-    while (!fRig.connected && !StandAlone) {
-      fRig.connect();
-      delay(250);
-      if (millis() - t0 > 10000) {
-        break;
+      
+      // Short final wait to ensure we’re fully connected (handshake completion)
+      unsigned long t0 = millis();
+      while (!fRig.connected && !StandAlone) {
+        fRig.connect();
+        delay(250);
+        if (millis() - t0 > 5000) {
+          break;
+        }
       }
     }
   }
