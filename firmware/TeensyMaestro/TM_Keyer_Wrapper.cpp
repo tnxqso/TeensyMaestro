@@ -14,8 +14,8 @@
 
   See LICENSE for full license text and NOTICE for attributions.
   Creative Commons BY-NC-SA 3.0: https://creativecommons.org/licenses/by-nc-sa/3.0/
+  
 */
-
 
 #include <Arduino.h>
 #include "TM_Keyer_Engine.h"
@@ -86,23 +86,26 @@ static const int Enc9_Band    = 8;
 // Tracks the last speed set by the Host to prevent echo loops
 int g_lastHostWpm = -1;
 
-// --- INTERRUPT SAFETY: NETWORK KEYING BUFFER ---
-// We use a small Ring Buffer to pass key events from the fast ISR
-// to the slower Main Loop without missing edges.
+// --- INTERRUPT SAFETY GLOBALS ---
+// Network Keying Buffer
 struct NetKeyEvt {
     uint8_t state;      // 1=Down, 0=Up
     uint16_t timestamp; // millis() % 0xFFFF
 };
 
-static const int NET_KEY_BUF_SIZE = 64; // Increased slightly for safety
+static const int NET_KEY_BUF_SIZE = 64; 
 volatile NetKeyEvt g_netKeyBuf[NET_KEY_BUF_SIZE];
 volatile int g_netKeyHead = 0;
 volatile int g_netKeyTail = 0;
 
+// Deferred WPM Update
+volatile bool g_wpmUpdatePending = false;
+volatile uint8_t g_pendingWpmVal = 0;
+
 // Helper to push to buffer (Runs in ISR)
 inline void pushNetKey(bool on) {
     int next = (g_netKeyHead + 1) % NET_KEY_BUF_SIZE;
-    if (next != g_netKeyTail) { // Check for overflow
+    if (next != g_netKeyTail) { 
         g_netKeyBuf[g_netKeyHead].state = on ? 1 : 0;
         g_netKeyBuf[g_netKeyHead].timestamp = (uint16_t)(millis() & 0xFFFF);
         g_netKeyHead = next;
@@ -113,20 +116,19 @@ inline void pushNetKey(bool on) {
 // ENGINE CALLBACKS
 // ============================================================
 
-// Callback: WPM Changed by Macro/Host
+// Callback: WPM Changed by Macro/Host (MAY RUN IN ISR)
 void Engine_Wpm_Callback(uint8_t newWpm) {
     newWpm = TMU_ClampWpm(newWpm);
+    
+    // Update critical state immediately
     g_lastHostWpm = newWpm;
     CWVal = newWpm;
     WPM = newWpm;
     
-    if (Encoder_9 == Enc9_CWSpeed) {
-        CWMicEnc.write(CWVal * CWEncSteps);
-    }
-    
-    if (Encoder_9 == Enc9_CWSpeed || Encoder_9 == Enc9_RFPower || Encoder_9 == Enc9_Band) {
-        DispCWSpeed();
-    }
+    // DEFER UI UPDATES!
+    // Do NOT call DispCWSpeed() or Encoder writes here.
+    g_pendingWpmVal = newWpm;
+    g_wpmUpdatePending = true;
 }
 
 // Callback: PTT State Changed
@@ -221,6 +223,8 @@ void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline)
   newWpm = TMU_ClampWpm(newWpm); 
 
   if (!preserveBaseline && newWpm == g_lastHostWpm) {
+      // Just set internal state, display update handled in KeyerLoop if needed,
+      // but usually this is called from UI thread anyway.
       CWVal = newWpm;
       WPM = newWpm;
       if (Encoder_9 == Enc9_CWSpeed) {
@@ -261,9 +265,26 @@ void Keyer_AbortNow(void) {
     g_keyerEngine.abortNow();
 }
 
-// THIS IS CALLED FROM MAIN LOOP (SAFE FOR NETWORK)
+// THIS IS CALLED FROM MAIN LOOP (SAFE FOR NETWORK & UI)
 void KeyerLoop() {
-  // Process all pending events in buffer
+  
+  // 1. Process Deferred WPM Updates (Safe UI Update)
+  if (g_wpmUpdatePending) {
+      g_wpmUpdatePending = false;
+      int val = g_pendingWpmVal;
+      
+      // Update Encoder position safely
+      if (Encoder_9 == Enc9_CWSpeed) {
+          CWMicEnc.write(val * CWEncSteps);
+      }
+      
+      // Update Display safely
+      if (Encoder_9 == Enc9_CWSpeed || Encoder_9 == Enc9_RFPower || Encoder_9 == Enc9_Band) {
+          DispCWSpeed();
+      }
+  }
+
+  // 2. Process all pending network keying events
   while (g_netKeyHead != g_netKeyTail) {
       
       // FIX: Read fields individually to avoid "volatile" copy-constructor error

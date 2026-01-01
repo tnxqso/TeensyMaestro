@@ -123,6 +123,10 @@ public:
   #define WK_CMD_BUF_SPEED    0x1C
 #endif
 
+#ifndef WK_CMD_KEY_IMMEDIATE
+  #define WK_CMD_KEY_IMMEDIATE 0x17
+#endif
+
 #ifndef TM_WK_RXBUF_SIZE
   #define TM_WK_RXBUF_SIZE 2048
 #endif

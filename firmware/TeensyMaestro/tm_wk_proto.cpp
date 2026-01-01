@@ -289,7 +289,7 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  if (b == WK_CMD_SIDETONE || b == WK_CMD_SET_WPM_IMM || b == WK_CMD_SET_WEIGHT) {
+  if (b == WK_CMD_SIDETONE || b == WK_CMD_SET_WPM_IMM || b == WK_CMD_SET_WEIGHT || b == WK_CMD_KEY_IMMEDIATE) {
     _immCmd  = b;
     _immNeed = 1;
     _immGot  = 0;
@@ -445,6 +445,13 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       break;
     }
 
+    // FIX: Consume the parameter for KEY_IMMEDIATE (0x17)
+    case WK_CMD_KEY_IMMEDIATE: {
+      // Logic for software PTT/Key can be added here if needed.
+      // For now, we consume it to avoid the "22" bug.
+      break;
+    }
+    
     case WK_CMD_SET_WPM_IMM: { 
       uint8_t w = p;
       if (w < TM_WK_WPM_MIN) w = TM_WK_WPM_MIN;
