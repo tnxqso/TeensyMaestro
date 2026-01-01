@@ -1229,6 +1229,7 @@ void loop()
 
   TMTime_loop();
   ClockWidget_Loop();
+  KeyerLoop();
 
   // --------------------------------------------------------------
   // PADDLE INPUT LOGIC (Moved from ISR to Polling)

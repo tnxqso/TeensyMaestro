@@ -7,7 +7,15 @@
 
   A community-maintained edition with open-source utilities
   for ham radio enthusiasts, focusing on FlexRadio® and Wavelog integrations.
+
+  Based on the original TeensyMaestro by Len Koppl (KD0RC),
+  which integrates the FlexRadio 6000 library by IW7DMH.
+  Portions of this work remain © Len Koppl and © IW7DMH as noted.
+
+  See LICENSE for full license text and NOTICE for attributions.
+  Creative Commons BY-NC-SA 3.0: https://creativecommons.org/licenses/by-nc-sa/3.0/
 */
+
 
 #include <Arduino.h>
 #include "TM_Keyer_Engine.h"
@@ -78,10 +86,28 @@ static const int Enc9_Band    = 8;
 // Tracks the last speed set by the Host to prevent echo loops
 int g_lastHostWpm = -1;
 
-// --- INTERRUPT SAFETY GLOBALS ---
-// Used to defer network calls from ISR to Main Loop
-volatile bool g_pendingNetKey = false;
-volatile int  g_pendingNetKeyState = 0;
+// --- INTERRUPT SAFETY: NETWORK KEYING BUFFER ---
+// We use a small Ring Buffer to pass key events from the fast ISR
+// to the slower Main Loop without missing edges.
+struct NetKeyEvt {
+    uint8_t state;      // 1=Down, 0=Up
+    uint16_t timestamp; // millis() % 0xFFFF
+};
+
+static const int NET_KEY_BUF_SIZE = 64; // Increased slightly for safety
+volatile NetKeyEvt g_netKeyBuf[NET_KEY_BUF_SIZE];
+volatile int g_netKeyHead = 0;
+volatile int g_netKeyTail = 0;
+
+// Helper to push to buffer (Runs in ISR)
+inline void pushNetKey(bool on) {
+    int next = (g_netKeyHead + 1) % NET_KEY_BUF_SIZE;
+    if (next != g_netKeyTail) { // Check for overflow
+        g_netKeyBuf[g_netKeyHead].state = on ? 1 : 0;
+        g_netKeyBuf[g_netKeyHead].timestamp = (uint16_t)(millis() & 0xFFFF);
+        g_netKeyHead = next;
+    }
+}
 
 // ============================================================
 // ENGINE CALLBACKS
@@ -89,22 +115,15 @@ volatile int  g_pendingNetKeyState = 0;
 
 // Callback: WPM Changed by Macro/Host
 void Engine_Wpm_Callback(uint8_t newWpm) {
-    // FIX: Clamp incoming WPM immediately.
     newWpm = TMU_ClampWpm(newWpm);
-
-    // 1. Save this CLAMPED value so we don't echo it back later
     g_lastHostWpm = newWpm;
-
-    // 2. Update internal state
     CWVal = newWpm;
     WPM = newWpm;
     
-    // 3. Update Encoder logic
     if (Encoder_9 == Enc9_CWSpeed) {
         CWMicEnc.write(CWVal * CWEncSteps);
     }
     
-    // 4. Update Display
     if (Encoder_9 == Enc9_CWSpeed || Encoder_9 == Enc9_RFPower || Encoder_9 == Enc9_Band) {
         DispCWSpeed();
     }
@@ -112,10 +131,7 @@ void Engine_Wpm_Callback(uint8_t newWpm) {
 
 // Callback: PTT State Changed
 void Engine_Ptt_Callback(bool on) {
-    // This callback should NOT trigger network PTT for local keying.
-    if (KeyerOut == "LOCAL") {
-        // No action for LOCAL mode PTT here.
-    }
+    // No action for LOCAL mode PTT here.
 }
 
 // Callback: Key State Changed (CALLED FROM INTERRUPT)
@@ -125,8 +141,6 @@ void Engine_Key_Callback(bool on) {
   KeyDown = on; 
   if (on) {
       if (!OldKeyDown) OldKeyDown = true;
-      
-      // Sidetone Logic
       if (SideTone) { 
           unsigned int safeFreq = (STFreq < 200) ? 800 : STFreq;
           tone(LOCAL_STPin, safeFreq);
@@ -136,17 +150,15 @@ void Engine_Key_Callback(bool on) {
       noTone(LOCAL_STPin);
   }
 
-  // Handle LOCAL physical keying (Local OR Both)
+  // Handle LOCAL physical keying
   if (KeyerOut == "LOCAL" || KeyerOut == "BOTH") {
       digitalWrite(LOCAL_KeyOutPin, on ? HIGH : LOW);
   }
 
-  // Handle ETHERNET network keying (Ethernet OR Both)
+  // Handle ETHERNET network keying
   if (KeyerOut == "ETHERNET" || KeyerOut == "BOTH") {
-      // CRITICAL FIX: DO NOT CALL NETWORK SEND FROM INTERRUPT!
-      // We set a flag, and let KeyerLoop() handle the actual TCP send.
-      g_pendingNetKeyState = on ? 1 : 0;
-      g_pendingNetKey = true;
+      // Buffer the event for the main loop to process
+      pushNetKey(on);
   }
 }
 
@@ -165,7 +177,6 @@ void Engine_Paddle_Callback(bool active) {
 // ============================================================
 
 void KeyerSetup() {
-  // 1. Configure Hardware Pins
   pinMode(DotPin, INPUT_PULLUP);
   pinMode(DashPin, INPUT_PULLUP);
   pinMode(LOCAL_StraightKeyPin, INPUT_PULLUP);
@@ -177,21 +188,17 @@ void KeyerSetup() {
 
   g_KeyerTimingActive = false;
   
-  // 2. Initialize the Engine
   g_keyerEngine.begin();
   
-  // 3. Attach Callbacks
   g_keyerEngine.attachKeyCallback(Engine_Key_Callback);
   g_keyerEngine.attachPttCallback(Engine_Ptt_Callback);
   g_keyerEngine.attachWpmChangeCallback(Engine_Wpm_Callback);
   g_keyerEngine.attachCharSentCallback(Engine_CharSent_Callback);
   g_keyerEngine.attachPaddleActivityCallback(Engine_Paddle_Callback); 
 
-  // 4. Set Initial Speed
   if (WPM < 5) WPM = 20;
   g_keyerEngine.setWpm((uint8_t)WPM);
 
-  // 5. Set Keyer Mode
   if      (KeyMode == "A") g_keyerEngine.setMode(KeyerMode::IAMBIC_A);
   else if (KeyMode == "B") g_keyerEngine.setMode(KeyerMode::IAMBIC_B);
   else if (KeyMode == "U") g_keyerEngine.setMode(KeyerMode::ULTIMATIC);
@@ -199,7 +206,6 @@ void KeyerSetup() {
   else if (KeyMode == "C") g_keyerEngine.setMode(KeyerMode::SINGLE_PADDLE);
   else                     g_keyerEngine.setMode(KeyerMode::IAMBIC_B);
 
-  // 6. Set Pro Features
   g_keyerEngine.setCompensation((uint8_t)KeyerCompensation);
   g_keyerEngine.setFirstExtension((uint8_t)KeyerFirstExtension);
   g_keyerEngine.setFarnsworth((uint8_t)KeyerFarnsworth);
@@ -214,11 +220,9 @@ void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline)
 {
   newWpm = TMU_ClampWpm(newWpm); 
 
-  // FIX: Anti-feedback loop logic for RumLogNG
   if (!preserveBaseline && newWpm == g_lastHostWpm) {
       CWVal = newWpm;
       WPM = newWpm;
-      
       if (Encoder_9 == Enc9_CWSpeed) {
         CWMicEnc.write(CWVal * CWEncSteps);
       }
@@ -238,9 +242,7 @@ void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline)
     }
   }
   WPM = CWVal;
-  
   ElementLen = (1200000L / (WPM > 0 ? WPM : 1));
-
   g_keyerEngine.setWpm((uint8_t)CWVal);
 
   if (Encoder_9 == Enc9_CWSpeed) {
@@ -261,10 +263,15 @@ void Keyer_AbortNow(void) {
 
 // THIS IS CALLED FROM MAIN LOOP (SAFE FOR NETWORK)
 void KeyerLoop() {
-  if (g_pendingNetKey) {
-      // Process deferred network keying
-      g_pendingNetKey = false;
-      int keyState = g_pendingNetKeyState;
+  // Process all pending events in buffer
+  while (g_netKeyHead != g_netKeyTail) {
+      
+      // FIX: Read fields individually to avoid "volatile" copy-constructor error
+      uint8_t  evtState = g_netKeyBuf[g_netKeyTail].state;
+      uint16_t evtTime  = g_netKeyBuf[g_netKeyTail].timestamp;
+      
+      // Advance tail
+      g_netKeyTail = (g_netKeyTail + 1) % NET_KEY_BUF_SIZE;
 
       if (g_fRig && g_fRig->connected) {
           int txSlice = -1;
@@ -278,8 +285,8 @@ void KeyerLoop() {
           if (txSlice >= 0 && g_fRig->slice[txSlice].mode == "CW" && g_fRig->transmit.break_in == 1) {
               char buf[128];
               snprintf(buf, sizeof(buf), "cw key %d time=0x%X index=%u client_handle=%s", 
-                  keyState,
-                  (unsigned)(millis() % 0xFFFF), 
+                  evtState,
+                  evtTime, 
                   (unsigned)CWIndex++, 
                   g_fRig->Client_Handle[ClientMenuItem].c_str());
 

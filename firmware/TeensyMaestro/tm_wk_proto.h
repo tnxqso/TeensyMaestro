@@ -1,6 +1,19 @@
 /*
   tm_wk_proto.h
+
   TeensyMaestro — Community Edition (CE)
+  SPDX-License-Identifier: CC-BY-NC-SA-3.0
+  SPDX-FileCopyrightText: 2025 TNX QSO
+
+  A community-maintained edition with open-source utilities
+  for ham radio enthusiasts, focusing on FlexRadio® and Wavelog integrations.
+
+  Based on the original TeensyMaestro by Len Koppl (KD0RC),
+  which integrates the FlexRadio 6000 library by IW7DMH.
+  Portions of this work remain © Len Koppl and © IW7DMH as noted.
+
+  See LICENSE for full license text and NOTICE for attributions.
+  Creative Commons BY-NC-SA 3.0: https://creativecommons.org/licenses/by-nc-sa/3.0/
 */
 
 #pragma once
@@ -142,19 +155,31 @@ public:
   void setLocalBaseline(uint8_t wpm);
 
   void onByte(uint8_t b);
-  void onKeyerCharEcho(uint8_t ch) FLASHMEM;
-  void onPaddleActivity(bool active) FLASHMEM; 
+  void onKeyerCharEcho(uint8_t ch);
+  void onPaddleActivity(bool active); 
 
   void poll() FLASHMEM;
   void sendUnsolicited() FLASHMEM;
-  uint8_t buildStatusByte() const FLASHMEM;
+  uint8_t buildStatusByte() const;
   void sendStatusIdleNow() FLASHMEM;
   void onTransportClosed() FLASHMEM;  
   void onProtoClosed() FLASHMEM;      
 
 private:
+  // --- Dirty Flags & Buffers for ISR Safety ---
+  // We use these to defer writing to Serial/TCP until the main poll() loop.
   bool     _potStatusPending = false;
   uint8_t  _pendingPotStatusWpm = 0;
+  
+  volatile bool _paddleStatusPending = false; // Set by ISR
+  
+  static const int ECHO_BUF_SIZE = 32;
+  volatile uint8_t _echoBuf[ECHO_BUF_SIZE];
+  volatile int     _echoHead = 0;
+  volatile int     _echoTail = 0;
+
+  // --------------------------------------------
+
   uint8_t _lastHostImmediateWpm = 0xFF;
   static TM_WK_Protocol* s_active;
 

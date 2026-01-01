@@ -11,7 +11,7 @@
 #include <Arduino.h>
 
 #ifndef TM_WK_TRACE_SD
-  #define TM_WK_TRACE_SD 1
+  #define TM_WK_TRACE_SD 0
 #endif
 
 #if TM_WK_TRACE_SD

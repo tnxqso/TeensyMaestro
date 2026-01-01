@@ -5,11 +5,17 @@
   SPDX-License-Identifier: CC-BY-NC-SA-3.0
   SPDX-FileCopyrightText: 2025 TNX QSO
 
-  VERSION 0.9.14
-  - FULL INTERRUPT SAFETY.
-  - Removed all Serial/SD logging from ISR callbacks (Paddle & CharEcho).
-  - Refactored decoder (No infinite loops).
+  A community-maintained edition with open-source utilities
+  for ham radio enthusiasts, focusing on FlexRadio® and Wavelog integrations.
+
+  Based on the original TeensyMaestro by Len Koppl (KD0RC),
+  which integrates the FlexRadio 6000 library by IW7DMH.
+  Portions of this work remain © Len Koppl and © IW7DMH as noted.
+
+  See LICENSE for full license text and NOTICE for attributions.
+  Creative Commons BY-NC-SA 3.0: https://creativecommons.org/licenses/by-nc-sa/3.0/
 */
+
 
 #include "tm_wk_proto.h"
 
@@ -105,12 +111,10 @@ TM_WK_Protocol* TM_WK_Protocol::active() {
 }
 
 FLASHMEM void TM_WK_Protocol::setLocalBaseline(uint8_t wpm) {
-    // Loop Prevention
     if (wpm == _lastHostImmediateWpm) {
         return;
     }
 
-    // Jitter Prevention (Smart Squelch)
     uint8_t newRaw = mapWpmToPotRaw(wpm);
     if (newRaw == _lastPotSentRaw) {
         _baselineWpm = wpm;
@@ -121,39 +125,43 @@ FLASHMEM void TM_WK_Protocol::setLocalBaseline(uint8_t wpm) {
     _baselineWpm = wpm;
     _baselineSaved = true;
     
-    // Set flag instead of sending immediately to avoid recursion
+    // Set flag for main loop
     _pendingPotStatusWpm = wpm;
     _potStatusPending = true;
 }
 
-// === PADDLE ACTIVITY HANDLER ===
-// NOTE: Called from ISR. Must NOT do Serial/SD IO.
+// === PADDLE ACTIVITY HANDLER (ISR) ===
+// Safe: Sets flag only.
 void TM_WK_Protocol::onPaddleActivity(bool active) {
     if (!_hostOpen) return;
-
-    // Hard Squelch during startup
+    
+    // Hard squelch check (using volatile/atomic read is safe enough here)
     if (_suppressUnsolicitedUntilMs && 
        (int32_t)(millis() - _suppressUnsolicitedUntilMs) < 0) {
        return;
     }
 
-    if (_w) {
-        uint8_t s = buildStatusByte();
-        _w->writeByte(s);
-        _lastStatusSent = s; 
-        
-        // NO LOGGING HERE!
-    }
+    _paddleStatusPending = true;
+}
+
+// === CHAR ECHO HANDLER (ISR) ===
+// Safe: Pushes to ring buffer only.
+void TM_WK_Protocol::onKeyerCharEcho(uint8_t ch)
+{
+  if (!_hostOpen) return;
+
+  int next = (_echoHead + 1) % ECHO_BUF_SIZE;
+  if (next != _echoTail) {
+      _echoBuf[_echoHead] = ch;
+      _echoHead = next;
+  }
 }
 
 // ========== RX FIFO primitives ==========
 bool TM_WK_Protocol::rxPush(uint8_t b) {
   uint16_t nhead = rxNext(_rhead);
   if (nhead == _rtail) {
-#if WK_WARN_TRACE    
-    WK_DEBUGLN(F("WK: RX overflow, dropping byte"));
-#endif
-    return false;
+    return false; // Overflow
   }
   bool wasEmpty = rxEmpty();
   _rx[_rhead] = b;
@@ -187,18 +195,12 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     _immCmd  = IMMCMD_NONE;
     _immNeed = 0;
     _immGot  = 0;
-#if WK_INFO_TRACE
-    WK_DEBUGLN(F("WK: EchoTest armed via raw pattern <00><04> (failsafe)"));
-#endif
     return;
   }
 
   if (_adminEchoPending) {
     _adminEchoPending = false;
     if (_w) _w->writeByte(b);
-#if WK_RX_TRACE
-    WK_DEBUGF("DBG: ECHO -> 0x%02X\n", (unsigned)b);
-#endif
     return;
   }
 
@@ -223,9 +225,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     }
     if (b == WK_CMD_HOST_OPEN) {
       _immCmd = WK_CMD_HOST_OPEN;
-#if WK_ENQ_TRACE
-      WK_DEBUGF("WK: -> IMM_CMD (0x00) while closed\n");
-#endif
       return;
     }
     return;
@@ -234,20 +233,13 @@ void TM_WK_Protocol::onByte(uint8_t b) {
   if (_rxBufferedParamArmed) {
     _rxBufferedParamArmed = false;
     rxPush(b);
-#if WK_ENQ_TRACE
-    WK_DEBUGF("DBG: RX_ENQ param 0x%02X (armed->cleared)\n", (unsigned)b);
-#endif
     return;
   }
 
   if (_immCmd != IMMCMD_NONE && _immNeed > 0) {
     _immBuf[_immGot++] = b;
     if (_immGot >= _immNeed) {
-      if (_immCmd == WK_CMD_HOST_OPEN) {
-        handleImmediateParam(_immBuf[0]); 
-      } else {
-        handleImmediateParam(_immBuf[0]);
-      }
+      handleImmediateParam(_immBuf[0]);
       _immCmd  = IMMCMD_NONE;
       _immNeed = 0;
       _immGot  = 0;
@@ -260,16 +252,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     rxPush(b);
     _waitingOpcode  = b;
     _waitingSinceMs = millis();
-#if WK_ENQ_TRACE
-    WK_DEBUGF("DBG: RX_ENQ opcode 0x%02X (armed)\n", (unsigned)b);
-#endif
-    return;
-  }
-
-  if (_asciiSquelch && isAscii(b)) {
-#if WK_INFO_TRACE
-    WK_DEBUGF("WK: squelch ASCII 0x%02X (timer)\n", (unsigned)b);
-#endif
     return;
   }
 
@@ -288,11 +270,7 @@ void TM_WK_Protocol::onByte(uint8_t b) {
   }
 
   if (b == WK_CMD_CLEAR_BUF) {
-#if WK_INFO_TRACE
-    WK_DEBUGLN(F("WK: CLEAR_BUFFER (<0A>) -> Clearing queue"));
-#endif
-
-    _rtail = _rhead;
+    _rtail = _rhead; 
     _rxBufferedParamArmed = false;
     _waitingOpcode        = 0;
     _waitingSinceMs       = 0;
@@ -327,7 +305,7 @@ void TM_WK_Protocol::onByte(uint8_t b) {
 
   if (b == WK_CMD_SET_POT_LIMITS) {     
     _immCmd  = b;
-    _immNeed = 2;
+    _immNeed = 2; 
     _immGot  = 0;
     return;
   }
@@ -347,25 +325,6 @@ void TM_WK_Protocol::onByte(uint8_t b) {
   }
 
   rxPush(b);
-#if WK_ENQ_TRACE
-  WK_DEBUGF("DBG: RX_ENQ 0x%02X\n", (unsigned)b);
-#endif
-
-}
-
-// NOTE: Called from ISR. Must NOT do Serial/SD IO.
-void TM_WK_Protocol::onKeyerCharEcho(uint8_t ch)
-{
-  if (!_hostOpen) return;
-
-  if (_w) _w->writeByte(ch);
-  const uint32_t now = millis();
-  _lastHostRxMs     = now;
-  _lastTxActivityMs = now;
-  
-  // NO LOGGING HERE!
-  
-  sendStatusStartIfNeeded();
 }
 
 FLASHMEM void TM_WK_Protocol::handleImmediateCommandByte(uint8_t) {
@@ -383,8 +342,6 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       bool change  = false;
 
       if (p == 0x02) {           // CONNECT
-        
-        // SAFETY: Clear queues to prevent ghost TX
         _k.clearTextQueue(); 
         _k.abortNow(); 
 
@@ -394,23 +351,16 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
         _adminBaudPending = false;
         _adminRequestedBaud = 0;
 
-#if WK_INFO_TRACE
-        WK_DEBUGLN(F("WK: HOST OPEN -> CONNECT"));
-#endif
         _armedSpeedValid = false;
         _txHoldUntilMs   = 0;
         _rhead = _rtail;
         
-        // Set suppression timer to block NOISE
         _suppressUnsolicitedUntilMs = millis() + 1500;
         
         _lastPotSentRaw  = mapWpmToPotRaw(_k.getWpm());
 
         if (_w) {
           _w->writeByte(WK_REVISION_CODE);
-#if WK_INFO_TRACE
-          WK_DEBUGF("WK: send revision 0x%02X on CONNECT\n", (unsigned)WK_REVISION_CODE);
-#endif
         }
 
         _asciiSquelch        = true;
@@ -421,8 +371,8 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
         _baselineWpm   = _k.getWpm();
         _baselineSaved = true;
         
-        // --- FORCE INITIAL STATUS (Bypass Suppression) ---
-        // This fixes the "-" display in RumLogNG. 
+        // --- FORCE INITIAL STATUS ---
+        // Vital for RumLogNG. Safe here in main context.
         if (_w) {
             uint8_t raw    = mapWpmToPotRaw(_baselineWpm);
             uint8_t potMsg = makePotStatusByte(raw);
@@ -435,9 +385,6 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
         return;
       } else if (p == 0x04) {    // EchoTest
         _adminEchoPending = true;
-#if WK_INFO_TRACE
-        WK_DEBUGLN(F("WK: HOST OPEN EchoTest armed"));
-#endif
         return;
       } else if (p == 0x09) {    
         if (_w) _w->writeByte(WK_REVISION_CODE);
@@ -488,9 +435,6 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       }
 
       if (change) {
-#if WK_INFO_TRACE
-        WK_DEBUGLN(newOpen ? F("WK: BEEP CONNECT") : F("WK: BEEP DISCONNECT"));
-#endif
         wk_play_connect_tune(newOpen);
         _lastStatusSent = WK_STATUS_TAG;
       }
@@ -503,11 +447,9 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
 
     case WK_CMD_SET_WPM_IMM: { 
       uint8_t w = p;
-      // 1. Clamp to absolute physical limits
       if (w < TM_WK_WPM_MIN) w = TM_WK_WPM_MIN;
       if (w > TM_WK_WPM_MAX) w = TM_WK_WPM_MAX;
       
-      // 2. RUM LOG FIX: Clamp to Active Pot Limits
       if (w < _potMinWpm) w = _potMinWpm;
       if (w > (_potMinWpm + _potRangeWpm)) w = (_potMinWpm + _potRangeWpm);
 
@@ -528,9 +470,6 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
     case WK_CMD_WK2_MODE: {
       const uint8_t mode = _immBuf[0];
       _wkModeReg = mode;
-#if WK_INFO_TRACE
-      WK_DEBUGF("WK: WK2 mode register=0x%02X\n", (unsigned)mode);
-#endif
       break;
     }
     
@@ -559,13 +498,11 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       uint8_t hostMin   = _immBuf[0];
       uint8_t hostRange = _immBuf[1];
 
-      // Sanity checks
       if (hostMin < 5)   hostMin = 5;
       if (hostMin > 99)  hostMin = 99;
       if (hostRange < 10) hostRange = 10; 
       if (hostRange > 99) hostRange = 99;
 
-      // Cap max range
       uint16_t checkMax = (uint16_t)hostMin + (uint16_t)hostRange;
       if (checkMax > 99) {
           hostRange = (uint8_t)(99 - hostMin);
@@ -575,12 +512,10 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       _potMinWpm   = hostMin;
       _potRangeWpm = hostRange;
 
-      // --- SYNC LOGIC ---
       uint8_t currentWpm = _k.getWpm();
       uint8_t maxWpm     = _potMinWpm + _potRangeWpm;
       bool wpmChanged = false;
 
-      // 1. Force WPM into valid range (K1EL Spec)
       if (currentWpm < _potMinWpm) {
           _k.setWpmImmediate(_potMinWpm);
           currentWpm = _potMinWpm;
@@ -591,18 +526,13 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
           wpmChanged = true;
       }
 
-      // 2. Update Baseline
       if (wpmChanged) {
           setLocalBaseline(currentWpm);
       }
       
-      // 3. FORCE SEND STATUS (Bypass Suppression Timer)
-      if (_w) {
-          uint8_t raw    = mapWpmToPotRaw(currentWpm);
-          uint8_t potMsg = makePotStatusByte(raw);
-          _w->writeByte(potMsg);
-          _lastPotSentRaw = raw;
-      }
+      // Force status update (by flag)
+      _pendingPotStatusWpm = currentWpm;
+      _potStatusPending = true;
 
 #if WK_INFO_TRACE
       WK_DEBUGF("WK: POT LIMITS Min=%u Rng=%u Wpm=%u\n",
@@ -658,9 +588,6 @@ FLASHMEM void TM_WK_Protocol::sendStatusIdleIfPossible() {
   if (_armedSpeedValid) {
     setWpmProvenance(_armedSpeedWpm, WpmOrigin::BufferedApplyIdle, F("buf <1C> @idle"));
     _armedSpeedValid = false;
-#if WK_INFO_TRACE
-    WK_DEBUGF("WK: setWpm=%u [armed->applied @idle]\n", (unsigned)_armedSpeedWpm);
-#endif
   }
 
   const uint8_t s = WK_STATUS_TAG;
@@ -684,9 +611,6 @@ FLASHMEM void TM_WK_Protocol::sendReadyPulse() {
 FLASHMEM void TM_WK_Protocol::wk_play_ready_blip() {
   wk_play_short_tone();
   _asciiSquelch = false;
-#if WK_INFO_TRACE
-  WK_DEBUGF("WK: ASCII squelch released (ready)\n");
-#endif
 }
 
 FLASHMEM void TM_WK_Protocol::sendStatusIdleNow() {
@@ -696,9 +620,6 @@ FLASHMEM void TM_WK_Protocol::sendStatusIdleNow() {
     _w->writeByte(WK_STATUS_TAG); 
     _lastStatusSent   = WK_STATUS_TAG;
     _lastStatusSentMs = millis();
-#if WK_RX_TRACE    
-    WK_DEBUGLN(F("DBG: TX_STATUS(idle-now) 0xC0"));
-#endif
   }
 }
 
@@ -707,71 +628,38 @@ void TM_WK_Protocol::onProtoClosed() {
   _adminKeyerTypePending = false;
   _adminBaudPending      = false;
   _adminRequestedBaud    = 0;
-
   _immCmd  = IMMCMD_NONE;
   _immNeed = 0;
   _immGot  = 0;
-
   _rtail                = _rhead;
   _rxBufferedParamArmed = false;
   _waitingOpcode        = 0;
   _waitingSinceMs       = 0;
   _armedSpeedValid      = false;
   _txHoldUntilMs        = 0;
-
   _asciiSquelch               = false;
   _asciiSquelchUntilMs        = 0;
   _asciiReadyBlipArmed        = false;
   _suppressUnsolicitedUntilMs = 0;
-
   _k.clearTextQueue();
-
-  if (_baselineSaved) {
-    setWpmProvenance(_baselineWpm, WpmOrigin::BaselineRestore, F("baseline restore"));
-    recordHostSetWpm(_baselineWpm); 
-    _baselineSaved = false;
-  }
-  if (_baselineWeightSaved) {
-    _weight = _baselineWeight;
-    _baselineWeightSaved = false;
-  }
-
-#if WK_INFO_TRACE
-  WK_DEBUGLN(F("WK: PROTO CLOSE (<00><03>) -> internal reset (transport open)"));
-#endif
 }
 
 void TM_WK_Protocol::onTransportClosed() {
   if (_hostOpen) {
     _hostOpen = false;
-#if WK_INFO_TRACE
-    WK_DEBUGF("WK: TRANSPORT CLOSED -> DISCONNECT\n");
-#endif
     sendStatusIdleNow();
     wk_play_connect_tune(false);
   }
-
-  if (_baselineSaved) {
-    setWpmProvenance(_baselineWpm, WpmOrigin::BaselineRestore, F("baseline restore"));
-    recordHostSetWpm(_baselineWpm);
-    _baselineSaved = false;
-  }
-
-  if (_baselineWeightSaved) {
-    _weight = _baselineWeight;
-    _baselineWeightSaved = false;
-  }
-
   _asciiSquelch = false;
   _asciiSquelchUntilMs = 0;
   _waitingOpcode = 0;
 }
 
 
-// ========== poll() ==========
+// ========== poll() (Main Loop) ==========
 FLASHMEM void TM_WK_Protocol::poll() {
   
-  // 1. Process Pending Status (Safe from recursion)
+  // 1. Process Pending Status Flag
   if (_potStatusPending) {
       if (_w) {
           uint8_t raw = mapWpmToPotRaw(_pendingPotStatusWpm);
@@ -781,7 +669,29 @@ FLASHMEM void TM_WK_Protocol::poll() {
       _potStatusPending = false;
   }
 
-  // 2. Squelch Timer
+  // 2. Process Buffered Char Echoes (From ISR)
+  if (_w) {
+      const uint32_t now = millis();
+      while (_echoHead != _echoTail) {
+          _w->writeByte(_echoBuf[_echoTail]);
+          _echoTail = (_echoTail + 1) % ECHO_BUF_SIZE;
+          _lastHostRxMs = now;
+          _lastTxActivityMs = now;
+          sendStatusStartIfNeeded(); // Update status state tracking
+      }
+  }
+
+  // 3. Process Pending Paddle Status (From ISR)
+  if (_paddleStatusPending) {
+      _paddleStatusPending = false;
+      if (_w) {
+          uint8_t s = buildStatusByte();
+          _w->writeByte(s);
+          _lastStatusSent = s; 
+      }
+  }
+
+  // 4. Squelch Timer
   if (_asciiSquelch && ASCII_SQUELCH_MS > 0) {
     if (_asciiSquelchUntilMs && (int32_t)(millis() - _asciiSquelchUntilMs) >= 0) {
       _asciiSquelch = false;
@@ -793,20 +703,17 @@ FLASHMEM void TM_WK_Protocol::poll() {
     }
   }
 
-  // 3. Encoder Check
+  // 5. Encoder Check
   const uint8_t cur = _k.getWpm();
   if (_lastObservedWpm == 0xFF) {
     _lastObservedWpm = cur;
   }
   if (cur != _lastObservedWpm) {
-    // We update the observer, but we DO NOT call sendPotStatus() here anymore.
-    // This prevents the "echo loop" where a host speed command triggers a pot status reply.
-    // The only time sendPotStatus is called is when the user turns the knob (setLocalBaseline).
-    
     _lastObservedWpm = cur;
     _lastWpmOrigin   = WpmOrigin::None;
   }
 
+  // 6. Timeout check
   if (_waitingOpcode) {
     uint8_t head = 0;
     if (rxPeek(0, head) && head == _waitingOpcode && rxUsed() == 1) {
@@ -820,6 +727,7 @@ FLASHMEM void TM_WK_Protocol::poll() {
     }
   }
 
+  // 7. Tx Hold
   if (_txHoldUntilMs) {
     uint32_t now = millis();
     if ((int32_t)(now - _txHoldUntilMs) < 0) {
@@ -828,9 +736,10 @@ FLASHMEM void TM_WK_Protocol::poll() {
     _txHoldUntilMs = 0;
   }
   
-  // 6. Decode ONE command per loop (NO while(true) to prevent infinite hangs)
+  // 8. Decode One Command
   decodeAndExecute();
   
+  // 9. Status Idle
   sendStatusIdleIfPossible();
 }
 
@@ -839,8 +748,6 @@ FLASHMEM void TM_WK_Protocol::decodeAndExecute() {
   uint8_t b0;
   if (!rxPeek(0, b0)) return;
 
-  // --- Buffered Commands ---
-  
   if (b0 == WK_CMD_BUF_SPEED) {
     uint8_t b1;
     if (!rxPeek(1, b1)) return; 
@@ -871,11 +778,8 @@ FLASHMEM void TM_WK_Protocol::decodeAndExecute() {
     return; 
   }
 
-  // --- TEXT / ASCII HANDLING ---
-  
-  // Junk check
   if (!isAscii(b0)) {
-    uint8_t junk = 0; // FIX: Initialize variable to suppress warning
+    uint8_t junk = 0; 
     rxPop(junk);
 #if WK_INFO_TRACE
     WK_DEBUGF("WK: Dropped non-ASCII/non-CMD 0x%02X\n", junk);
@@ -883,18 +787,12 @@ FLASHMEM void TM_WK_Protocol::decodeAndExecute() {
     return;
   }
 
-  // ASCII Squelch
   if (_asciiSquelch) {
-      uint8_t junk = 0; // FIX: Initialize variable
+      uint8_t junk = 0; 
       rxPop(junk);
-#if WK_INFO_TRACE
-      WK_DEBUGF("WK: Squelched ASCII 0x%02X\n", junk);
-#endif
       return;
   }
 
-  // Collect text
-  // FIX: Reduced buffer size to minimize time in critical section
   char out[16]; 
   size_t n = 0;
   while (n < sizeof(out)-1) {
@@ -913,14 +811,9 @@ FLASHMEM void TM_WK_Protocol::decodeAndExecute() {
     _armedSpeedValid = false;
   }
   
-  // --- CRITICAL FIX: PROTECT QUEUE FROM INTERRUPTS ---
-  // We must disable interrupts while adding text to the queue.
-  // Otherwise, the Keyer Engine (running in ISR) might read/write 
-  // simultaneously, corrupting memory and causing a Hard Fault/Freeze.
   noInterrupts(); 
   (void)_k.enqueueText(out, n);
   interrupts();
-  // ---------------------------------------------------
 
   _lastTxActivityMs = millis();
 
@@ -929,8 +822,6 @@ FLASHMEM void TM_WK_Protocol::decodeAndExecute() {
 #endif
 }
 
-// ========== Status byte ==========
-// Note: FLASHMEM removed to ensure this can be called from ISR context (onPaddleActivity)
 uint8_t TM_WK_Protocol::buildStatusByte() const {
   uint8_t s = WK_STATUS_TAG;
 
