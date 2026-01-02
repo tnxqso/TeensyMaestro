@@ -1031,7 +1031,7 @@ volatile int WPM = 24;
 
 bool XmitOn;
 
-IntervalTimer DotTimer;
+//IntervalTimer DotTimer;
 //IntervalTimer DebounceTimer;
 //IntervalTimer SideToneTimer;
 

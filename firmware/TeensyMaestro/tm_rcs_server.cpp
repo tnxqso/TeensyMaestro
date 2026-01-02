@@ -1,4 +1,6 @@
 /*
+  tm_rcs_server.cpp
+
   TeensyMaestro — Community Edition (CE)
   SPDX-License-Identifier: CC-BY-NC-SA-3.0
   SPDX-FileCopyrightText: 2025 TNX QSO
@@ -12,6 +14,7 @@
 
   See LICENSE for full license text and NOTICE for attributions.
   Creative Commons BY-NC-SA 3.0: https://creativecommons.org/licenses/by-nc-sa/3.0/
+  
 */
 
 #include "tm_rcs_server.h"
@@ -25,6 +28,10 @@ extern uint16_t CFG_RCS_TCP_Port;
 // Backend actions (implemented in Process_Buttons.ino)
 bool TM_RCS_RequestPTT(bool on);
 bool TM_RCS_RequestTune(bool on);
+
+// Switch SmartSDR TX audio source between MIC and DAX.
+// Implemented in Process_Buttons.ino.
+bool TM_RCS_RequestDax(bool on);
 
 // ===== Debug switches for Remote Command Server =====
 #ifndef RCS_DEBUG_ENABLE
@@ -197,6 +204,30 @@ namespace {
       }
 
       if (!ok) {
+        return String("ERR rig_not_controllable");
+      }
+      return String("OK");
+    }
+
+    // DAX commands
+    // Usage: "DAX ON" or "DAX OFF"
+    if (strcmp(verb, "DAX") == 0) {
+      if (!arg || arg[0] == '\0') {
+        return String("ERR missing_arg");
+      }
+
+      bool ok = false;
+
+      if (strcmp(arg, "ON") == 0) {
+        ok = TM_RCS_RequestDax(true);
+      } else if (strcmp(arg, "OFF") == 0) {
+        ok = TM_RCS_RequestDax(false);
+      } else {
+        return String("ERR invalid_arg");
+      }
+
+      if (!ok) {
+        // Rig not controllable in current mode
         return String("ERR rig_not_controllable");
       }
       return String("OK");

@@ -687,6 +687,23 @@ bool DoRigPTT(bool on)
   return true;
 }
 
+// Internal helper that switches TX audio source between MIC and DAX.
+// Return true if the command was sent to the rig, false if it was skipped.
+bool DoRigDax(bool on)
+{
+  if (!RigIsControllable()) {
+    debugln(F("DoRigDax(): skipped (rig not controllable)"));
+    return false;
+  }
+
+  // Flex TCP command: enable/disable TX DAX (controls the "DAX" button in SmartSDR TX panel)
+  fRig.send(on ? "audio tx source dax" : "audio tx source mic");
+
+  debug(F("DoRigDax(): DAX "));
+  debugln(on ? F("ON") : F("OFF"));
+  return true;
+}
+
 static bool DoRigTune(bool on)
 {
   if (!RigIsControllable()) {
@@ -719,6 +736,15 @@ bool TM_RCS_RequestPTT(bool on)
 bool TM_RCS_RequestTune(bool on)
 {
   return DoRigTune(on);
+}
+
+// Public API used by Remote Command Server (RCS) to request DAX TX audio.
+// Return true if the action was actually sent to the rig.
+bool TM_RCS_RequestDax(bool on)
+{
+  // NOTE: You must implement DoRigDax(on) (or map this to your existing rig control function).
+  // This should switch SmartSDR TX audio source between MIC and DAX.
+  return DoRigDax(on);
 }
 
 void HandleBtnTuneBefore()
