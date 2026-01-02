@@ -696,8 +696,8 @@ bool DoRigDax(bool on)
     return false;
   }
 
-  // Flex TCP command: enable/disable TX DAX (controls the "DAX" button in SmartSDR TX panel)
-  fRig.send(on ? "audio tx source dax" : "audio tx source mic");
+  // Enable/disable DAX as the primary transmit audio source.
+  fRig.send(on ? "transmit set dax=1" : "transmit set dax=0");
 
   debug(F("DoRigDax(): DAX "));
   debugln(on ? F("ON") : F("OFF"));
