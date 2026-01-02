@@ -14,7 +14,6 @@
 
   See LICENSE for full license text and NOTICE for attributions.
   Creative Commons BY-NC-SA 3.0: https://creativecommons.org/licenses/by-nc-sa/3.0/
-  
 */
 
 #include <Arduino.h>
@@ -25,8 +24,17 @@
 #include <FlexRigTeensy.h>   
 #include "tm_wk_proto.h"     
 
+// --- Constants (Moved up for visibility) ---
+static const byte LOCAL_KeyOutPin      = 33;
+static const byte LOCAL_StraightKeyPin = 32;
+static const byte LOCAL_STPin          = 34;
+
 // C-hook declaration for Paddle Status
 extern "C" void WK_OnPaddleActivity(bool active);
+// C-hook for Stop Beep (Safe)
+extern "C" void Keyer_StopBeep() {
+    noTone(LOCAL_STPin);
+}
 
 // --- Globals from TeensyMaestro.ino / Other Modules ---
 extern TM_Keyer_Engine g_keyerEngine;
@@ -42,7 +50,7 @@ extern int STFreq;
 extern volatile bool AbortMsg;
 extern volatile bool KeyDown;
 extern bool OldKeyDown;
-extern String KeyerOut;
+extern String KeyerOut;  
 extern volatile unsigned int CWIndex;
 extern int ClientMenuItem;
 
@@ -61,9 +69,6 @@ extern int CWEncSteps;
 // Pins
 extern byte DotPin;
 extern byte DashPin;
-static const byte LOCAL_KeyOutPin      = 33;
-static const byte LOCAL_StraightKeyPin = 32;
-static const byte LOCAL_STPin          = 34;
 
 // Globals used by Macros
 extern String MyCall;
@@ -84,30 +89,61 @@ static const int Enc9_RFPower = 2;
 static const int Enc9_Band    = 8;
 
 // Tracks the last speed set by the Host to prevent echo loops
-int g_lastHostWpm = -1;
+// FIX: volatile to prevent ISR data race
+volatile int g_lastHostWpm = -1;
 
 // --- INTERRUPT SAFETY GLOBALS ---
-// Network Keying Buffer
+
+// 1. Keyer Output Mode Cache (Integer for ISR safety)
+#define KEYOUT_NONE     0
+#define KEYOUT_LOCAL    1
+#define KEYOUT_ETHERNET 2
+#define KEYOUT_BOTH     3
+volatile uint8_t g_isrKeyOutMode = KEYOUT_LOCAL; 
+
+// 2. Network Keying Buffer
 struct NetKeyEvt {
     uint8_t state;      // 1=Down, 0=Up
     uint16_t timestamp; // millis() % 0xFFFF
 };
 
 static const int NET_KEY_BUF_SIZE = 64; 
-volatile NetKeyEvt g_netKeyBuf[NET_KEY_BUF_SIZE];
-volatile int g_netKeyHead = 0;
-volatile int g_netKeyTail = 0;
+// Enforce power-of-two for safe bitmasking logic
+static_assert((NET_KEY_BUF_SIZE & (NET_KEY_BUF_SIZE - 1)) == 0, "NET_KEY_BUF_SIZE must be power of two");
 
-// Deferred WPM Update
+volatile NetKeyEvt g_netKeyBuf[NET_KEY_BUF_SIZE];
+// Use uint8_t for atomic reads/writes on 32-bit architecture without disabling interrupts
+volatile uint8_t g_netKeyHead = 0;
+volatile uint8_t g_netKeyTail = 0;
+
+// 3. Deferred WPM Update
 volatile bool g_wpmUpdatePending = false;
 volatile uint8_t g_pendingWpmVal = 0;
 
+// 4. Deferred Sidetone (Fix for tone() in ISR)
+volatile bool g_sidetonePending = false;
+volatile bool g_sidetoneState   = false;
+
+// 5. Throttle
+static const unsigned long MAX_NET_EVENTS_PER_SEC = 40;
+static unsigned long g_netThrottleStartMs = 0;
+static int g_netEventsCount = 0;
+
+// Helper function to convert String config to Integer (Safe for ISR)
+void updateKeyOutMode() {
+    if (KeyerOut == "LOCAL")         g_isrKeyOutMode = KEYOUT_LOCAL;
+    else if (KeyerOut == "ETHERNET") g_isrKeyOutMode = KEYOUT_ETHERNET;
+    else if (KeyerOut == "BOTH")     g_isrKeyOutMode = KEYOUT_BOTH;
+    else                             g_isrKeyOutMode = KEYOUT_NONE;
+}
+
 // Helper to push to buffer (Runs in ISR)
 inline void pushNetKey(bool on) {
-    int next = (g_netKeyHead + 1) % NET_KEY_BUF_SIZE;
+    // Masking is faster than modulus and safe for power-of-two sizes
+    uint8_t next = (uint8_t)((g_netKeyHead + 1) & (NET_KEY_BUF_SIZE - 1));
     if (next != g_netKeyTail) { 
         g_netKeyBuf[g_netKeyHead].state = on ? 1 : 0;
-        g_netKeyBuf[g_netKeyHead].timestamp = (uint16_t)(millis() & 0xFFFF);
+        g_netKeyBuf[g_netKeyHead].timestamp = 0; // Timestamp filled in main loop
         g_netKeyHead = next;
     }
 }
@@ -120,46 +156,42 @@ inline void pushNetKey(bool on) {
 void Engine_Wpm_Callback(uint8_t newWpm) {
     newWpm = TMU_ClampWpm(newWpm);
     
-    // Update critical state immediately
+    // IMMEDIATE SUPPRESSION: Update g_lastHostWpm here in ISR.
+    // This closes the tiny race window where an echo might slip through 
+    // before KeyerLoop runs. Using volatile int is safe on Teensy 4.
     g_lastHostWpm = newWpm;
-    CWVal = newWpm;
-    WPM = newWpm;
     
-    // DEFER UI UPDATES!
-    // Do NOT call DispCWSpeed() or Encoder writes here.
+    // DEFER UI/STATE UPDATES:
+    // We still defer heavy stuff (Encoder/Display) to the main loop.
     g_pendingWpmVal = newWpm;
     g_wpmUpdatePending = true;
-}
-
-// Callback: PTT State Changed
-void Engine_Ptt_Callback(bool on) {
-    // No action for LOCAL mode PTT here.
 }
 
 // Callback: Key State Changed (CALLED FROM INTERRUPT)
 void Engine_Key_Callback(bool on) {
   
-  // 1. Audio and UI (Always active for practice)
   KeyDown = on; 
   if (on) {
       if (!OldKeyDown) OldKeyDown = true;
-      if (SideTone) { 
-          unsigned int safeFreq = (STFreq < 200) ? 800 : STFreq;
-          tone(LOCAL_STPin, safeFreq);
-      } 
   } else {
       if (OldKeyDown) OldKeyDown = false;
-      noTone(LOCAL_STPin);
   }
 
+  // FIX: Always update pending state.
+  // This ensures tone stops if SideTone is disabled mid-key.
+  g_sidetoneState   = (on && SideTone);
+  g_sidetonePending = true;
+
+  uint8_t mode = g_isrKeyOutMode; 
+
   // Handle LOCAL physical keying
-  if (KeyerOut == "LOCAL" || KeyerOut == "BOTH") {
-      digitalWrite(LOCAL_KeyOutPin, on ? HIGH : LOW);
+  if (mode == KEYOUT_LOCAL || mode == KEYOUT_BOTH) {
+      // Use digitalWriteFast for lower ISR latency
+      digitalWriteFast(LOCAL_KeyOutPin, on ? HIGH : LOW);
   }
 
   // Handle ETHERNET network keying
-  if (KeyerOut == "ETHERNET" || KeyerOut == "BOTH") {
-      // Buffer the event for the main loop to process
+  if (mode == KEYOUT_ETHERNET || mode == KEYOUT_BOTH) {
       pushNetKey(on);
   }
 }
@@ -190,6 +222,9 @@ void KeyerSetup() {
 
   g_KeyerTimingActive = false;
   
+  // Update the ISR-safe mode flag
+  updateKeyOutMode();
+
   g_keyerEngine.begin();
   
   g_keyerEngine.attachKeyCallback(Engine_Key_Callback);
@@ -223,8 +258,6 @@ void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline)
   newWpm = TMU_ClampWpm(newWpm); 
 
   if (!preserveBaseline && newWpm == g_lastHostWpm) {
-      // Just set internal state, display update handled in KeyerLoop if needed,
-      // but usually this is called from UI thread anyway.
       CWVal = newWpm;
       WPM = newWpm;
       if (Encoder_9 == Enc9_CWSpeed) {
@@ -268,31 +301,63 @@ void Keyer_AbortNow(void) {
 // THIS IS CALLED FROM MAIN LOOP (SAFE FOR NETWORK & UI)
 void KeyerLoop() {
   
-  // 1. Process Deferred WPM Updates (Safe UI Update)
+  // 0. Sync Keyer Mode (in case it changed via Menu)
+  updateKeyOutMode();
+
+  // 1. Process Deferred Sidetone (Safe Context)
+  if (g_sidetonePending) {
+      g_sidetonePending = false;
+      if (g_sidetoneState) {
+          unsigned int safeFreq = (STFreq < 200) ? 800 : STFreq;
+          tone(LOCAL_STPin, safeFreq);
+      } else {
+          noTone(LOCAL_STPin);
+      }
+  }
+
+// 2. Process Deferred WPM Updates (Safe UI Update)
   if (g_wpmUpdatePending) {
       g_wpmUpdatePending = false;
       int val = g_pendingWpmVal;
       
-      // Update Encoder position safely
+      // Update remaining state variables here
+      // (g_lastHostWpm was already set in ISR for immediate safety)
+      CWVal = val;
+      WPM = val;
+
       if (Encoder_9 == Enc9_CWSpeed) {
           CWMicEnc.write(val * CWEncSteps);
       }
       
-      // Update Display safely
       if (Encoder_9 == Enc9_CWSpeed || Encoder_9 == Enc9_RFPower || Encoder_9 == Enc9_Band) {
           DispCWSpeed();
       }
   }
 
-  // 2. Process all pending network keying events
+  // 3. Network Keying with "Spam Filter" (Throttle)
+  unsigned long now = millis();
+  if (now - g_netThrottleStartMs >= 1000) {
+      g_netThrottleStartMs = now;
+      g_netEventsCount = 0;
+  }
+
+  // Use masking logic matching the ISR producer
   while (g_netKeyHead != g_netKeyTail) {
       
-      // FIX: Read fields individually to avoid "volatile" copy-constructor error
       uint8_t  evtState = g_netKeyBuf[g_netKeyTail].state;
       uint16_t evtTime  = g_netKeyBuf[g_netKeyTail].timestamp;
       
-      // Advance tail
-      g_netKeyTail = (g_netKeyTail + 1) % NET_KEY_BUF_SIZE;
+      // Fix timestamp here in main loop if it was deferred
+      if (evtTime == 0) {
+          evtTime = (uint16_t)(now & 0xFFFF);
+      }
+      
+      // Advance tail using bitmask
+      g_netKeyTail = (g_netKeyTail + 1) & (NET_KEY_BUF_SIZE - 1);
+
+      if (g_netEventsCount >= MAX_NET_EVENTS_PER_SEC) {
+          continue; 
+      }
 
       if (g_fRig && g_fRig->connected) {
           int txSlice = -1;
@@ -312,6 +377,7 @@ void KeyerLoop() {
                   g_fRig->Client_Handle[ClientMenuItem].c_str());
 
               g_fRig->send(buf);
+              g_netEventsCount++;
           }
       }
   }

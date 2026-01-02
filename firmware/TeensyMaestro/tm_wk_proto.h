@@ -58,78 +58,38 @@ public:
   #define WK_REVISION_CODE 0x24
 #endif
 
-#ifndef WK_STATUS_TAG
-  #define WK_STATUS_TAG     0xC0
-#endif
-#ifndef WK_SBIT_BUSY
-  #define WK_SBIT_BUSY      0x04
-#endif
-#ifndef WK_SBIT_KEYDOWN
-  #define WK_SBIT_KEYDOWN   0x02
-#endif
-#ifndef WK_SBIT_XOFF
-  #define WK_SBIT_XOFF      0x01
-#endif
+// Status Bits
+static constexpr uint8_t WK_STATUS_TAG   = 0xC0;
+static constexpr uint8_t WK_SBIT_BUSY    = 0x04;
+static constexpr uint8_t WK_SBIT_KEYDOWN = 0x02;
+static constexpr uint8_t WK_SBIT_XOFF    = 0x01;
+static constexpr uint8_t WK_READY_PULSE  = 0x17;
 
-// WinKey command bytes
-#ifndef WK_CMD_HOST_OPEN
-  #define WK_CMD_HOST_OPEN    0x00
-#endif
-#ifndef WK_CMD_SIDETONE
-  #define WK_CMD_SIDETONE     0x01
-#endif
-#ifndef WK_CMD_SET_WPM_IMM
-  #define WK_CMD_SET_WPM_IMM  0x02
-#endif
-#ifndef WK_CMD_SET_WEIGHT
-  #define WK_CMD_SET_WEIGHT   0x03
-#endif
-#ifndef WK_CMD_SET_PTT_DELAYS
-  #define WK_CMD_SET_PTT_DELAYS 0x04
-#endif
-#ifndef WK_CMD_SET_POT_LIMITS
-  #define WK_CMD_SET_POT_LIMITS 0x05
-#endif
-#ifndef WK_CMD_GET_SPEED_POT
-  #define WK_CMD_GET_SPEED_POT 0x07
-#endif
-#ifndef WK_CMD_SET_OUTPUTS
-  #define WK_CMD_SET_OUTPUTS  0x09
-#endif
-
-#ifndef WK_CMD_FARNSWORTH
-  #define WK_CMD_FARNSWORTH   0x0D
-#endif
-#ifndef WK_CMD_WK2_MODE
-  #define WK_CMD_WK2_MODE     0x0E
-#endif
-#ifndef WK_CMD_FIRST_EXTENSION
-  #define WK_CMD_FIRST_EXTENSION 0x10
-#endif
-#ifndef WK_CMD_SET_COMP
-  #define WK_CMD_SET_COMP     0x11
-#endif
-#ifndef WK_CMD_STATUS_REQ
-  #define WK_CMD_STATUS_REQ   0x15
-#endif
-
-#ifndef WK_CMD_BUF_PTT
-  #define WK_CMD_BUF_PTT      0x18
-#endif
-#ifndef WK_CMD_BUF_WAIT
-  #define WK_CMD_BUF_WAIT     0x1A
-#endif
-#ifndef WK_CMD_BUF_SPEED
-  #define WK_CMD_BUF_SPEED    0x1C
-#endif
-
-#ifndef WK_CMD_KEY_IMMEDIATE
-  #define WK_CMD_KEY_IMMEDIATE 0x17
-#endif
+// WinKey OpCodes (Typed constants to avoid macro collisions)
+static constexpr uint8_t CMD_HOST_OPEN        = 0x00;
+static constexpr uint8_t CMD_SIDETONE         = 0x01;
+static constexpr uint8_t CMD_SET_WPM_IMM      = 0x02;
+static constexpr uint8_t CMD_SET_WEIGHT       = 0x03;
+static constexpr uint8_t CMD_SET_PTT_DELAYS   = 0x04;
+static constexpr uint8_t CMD_SET_POT_LIMITS   = 0x05;
+static constexpr uint8_t CMD_GET_SPEED_POT    = 0x07;
+static constexpr uint8_t CMD_SET_OUTPUTS      = 0x09;
+static constexpr uint8_t CMD_CLEAR_BUF        = 0x0A;
+static constexpr uint8_t CMD_FARNSWORTH       = 0x0D;
+static constexpr uint8_t CMD_WK2_MODE         = 0x0E;
+static constexpr uint8_t CMD_FIRST_EXTENSION  = 0x10;
+static constexpr uint8_t CMD_SET_COMP         = 0x11;
+static constexpr uint8_t CMD_STATUS_REQ       = 0x15;
+static constexpr uint8_t CMD_KEY_IMMEDIATE    = 0x17; 
+static constexpr uint8_t CMD_BUF_PTT          = 0x18;
+static constexpr uint8_t CMD_BUF_WAIT         = 0x1A;
+static constexpr uint8_t CMD_BUF_SPEED        = 0x1C;
 
 #ifndef TM_WK_RXBUF_SIZE
   #define TM_WK_RXBUF_SIZE 2048
 #endif
+// Ensure efficient masking logic works
+static_assert((TM_WK_RXBUF_SIZE & (TM_WK_RXBUF_SIZE - 1)) == 0, "TM_WK_RXBUF_SIZE must be power of two");
 #ifndef TM_WK_WPM_MIN
   #define TM_WK_WPM_MIN 5
 #endif
@@ -140,16 +100,10 @@ public:
   #define TM_WK_WAIT_UNIT_MS 10UL
 #endif
 
-#ifndef WK_CMD_CLEAR_BUF
-  #define WK_CMD_CLEAR_BUF 0x0A
-#endif
-
 class TM_WK_Protocol {
 public:
   TM_WK_Protocol(TM_IKeyer& keyer, TM_IByteWriter& writer);
   ~TM_WK_Protocol();
-
-  static constexpr uint8_t WK_READY_PULSE = 0x17;
 
   static TM_WK_Protocol* active();         
   void setWriter(TM_IByteWriter& writer) { _w = &writer; }
@@ -163,7 +117,6 @@ public:
   void onPaddleActivity(bool active); 
 
   void poll() FLASHMEM;
-  void sendUnsolicited() FLASHMEM;
   uint8_t buildStatusByte() const;
   void sendStatusIdleNow() FLASHMEM;
   void onTransportClosed() FLASHMEM;  
@@ -171,16 +124,29 @@ public:
 
 private:
   // --- Dirty Flags & Buffers for ISR Safety ---
-  // We use these to defer writing to Serial/TCP until the main poll() loop.
   bool     _potStatusPending = false;
   uint8_t  _pendingPotStatusWpm = 0;
   
-  volatile bool _paddleStatusPending = false; // Set by ISR
+  volatile bool _paddleStatusPending = false; 
   
   static const int ECHO_BUF_SIZE = 32;
+  // Enforce power-of-two for safe bitmasking
+  static_assert((ECHO_BUF_SIZE & (ECHO_BUF_SIZE - 1)) == 0, "ECHO_BUF_SIZE must be power of two");
+  
   volatile uint8_t _echoBuf[ECHO_BUF_SIZE];
-  volatile int     _echoHead = 0;
-  volatile int     _echoTail = 0;
+  volatile uint8_t _echoHead = 0;
+  volatile uint8_t _echoTail = 0;
+
+  // --- Immediate Command Timeout ---
+  uint32_t _immSinceMs = 0;
+
+  // --- Non-blocking Tune State Machine ---
+  enum TuneState { TUNE_IDLE, TUNE_TONE1, TUNE_GAP, TUNE_TONE2 };
+  TuneState _tuneState = TUNE_IDLE;
+  uint32_t  _tuneTimer = 0;
+  bool      _tuneIsConnect = true;
+
+  void startConnectTune(bool connect) FLASHMEM;
 
   // --------------------------------------------
 
@@ -324,6 +290,15 @@ private:
     const bool bufParse = _rxBufferedParamArmed; 
     return immParse || bufParse;
   }
+  
+  // --- HELPER to Ensure _immSinceMs is always set ---
+  inline void armImm(uint8_t cmd, uint8_t need) {
+      _immCmd     = cmd;
+      _immNeed    = need;
+      _immGot     = 0;
+      _immSinceMs = millis();
+  }
+
   inline void setWpmProvenance(uint8_t w, WpmOrigin origin, const __FlashStringHelper* why) {
     _lastWpmOrigin = origin;
     _k.setWpm(w);

@@ -23,6 +23,12 @@
 extern "C" void* extmem_malloc(size_t size);
 extern "C" void  extmem_free(void* ptr);
 
+// External StopBeep (Implemented in Wrapper)
+extern "C" void Keyer_StopBeep();
+
+// Provided by keyer layer
+extern void Keyer_Beep(uint16_t freq, uint16_t ms);
+
 // C hooks
 extern "C" void WK_OnCharEcho(uint8_t ch) {
   if (TM_WK_Protocol::active()) {
@@ -36,9 +42,6 @@ extern "C" void WK_OnPaddleActivity(bool active) {
   }
 }
 
-// Provided by keyer layer
-extern void Keyer_Beep(uint16_t freq, uint16_t ms);
-
 FLASHMEM void TM_WK_Protocol::onAdminSetBaud(uint32_t baud)
 {
   _adminRequestedBaud = baud;
@@ -51,31 +54,23 @@ FLASHMEM void TM_WK_Protocol::onAdminSetBaud(uint32_t baud)
 TM_WK_Protocol* TM_WK_Protocol::s_active = nullptr;
 static uint8_t s_lastRxByte = 0;
 
-// Connect/disconnect chirps
-#ifndef TM_WK_BEEP_ENABLE
-#define TM_WK_BEEP_ENABLE 1
-#endif
-#if TM_WK_BEEP_ENABLE
-static inline void wk_play_connect_tune(bool connect)
+// Non-blocking tune helper (State Machine)
+void TM_WK_Protocol::startConnectTune(bool connect)
 {
-  if (connect) {
-    Keyer_Beep(880,  80);
-    delay(120);
-    Keyer_Beep(1175, 90);
-  } else {
-    Keyer_Beep(1175, 90);
-    delay(120);
-    Keyer_Beep(880,  80);
-  }
+  #if TM_WK_BEEP_ENABLE
+    _tuneIsConnect = connect;
+    _tuneState     = TUNE_TONE1;
+    _tuneTimer     = millis();
+    // Start first tone immediately
+    if (connect) Keyer_Beep(880,  80);
+    else         Keyer_Beep(1175, 90);
+  #endif
 }
+
 static inline void wk_play_short_tone()
 {
   Keyer_Beep(1400,  40);
 }
-#else
-static inline void wk_play_connect_tune(bool) {}
-static inline void wk_play_short_tone() {}
-#endif
 
 // ========== ctor / active ==========
 TM_WK_Protocol::~TM_WK_Protocol() {
@@ -131,16 +126,9 @@ FLASHMEM void TM_WK_Protocol::setLocalBaseline(uint8_t wpm) {
 }
 
 // === PADDLE ACTIVITY HANDLER (ISR) ===
-// Safe: Sets flag only.
-void TM_WK_Protocol::onPaddleActivity(bool active) {
+// Safe: Sets flag only. No millis().
+void TM_WK_Protocol::onPaddleActivity(bool /*active*/) {
     if (!_hostOpen) return;
-    
-    // Hard squelch check (using volatile/atomic read is safe enough here)
-    if (_suppressUnsolicitedUntilMs && 
-       (int32_t)(millis() - _suppressUnsolicitedUntilMs) < 0) {
-       return;
-    }
-
     _paddleStatusPending = true;
 }
 
@@ -150,7 +138,8 @@ void TM_WK_Protocol::onKeyerCharEcho(uint8_t ch)
 {
   if (!_hostOpen) return;
 
-  int next = (_echoHead + 1) % ECHO_BUF_SIZE;
+  // Use masking for atomic uint8_t logic
+  uint8_t next = (_echoHead + 1) & (ECHO_BUF_SIZE - 1);
   if (next != _echoTail) {
       _echoBuf[_echoHead] = ch;
       _echoHead = next;
@@ -190,7 +179,7 @@ void TM_WK_Protocol::onByte(uint8_t b) {
   const uint8_t prev = s_lastRxByte;
   s_lastRxByte = b;
 
-  if (prev == WK_CMD_HOST_OPEN && b == 0x04) {
+  if (prev == CMD_HOST_OPEN && b == 0x04) {
     _adminEchoPending = true;
     _immCmd  = IMMCMD_NONE;
     _immNeed = 0;
@@ -214,17 +203,22 @@ void TM_WK_Protocol::onByte(uint8_t b) {
   if (b == 0xFF) return;
 
   if (!_hostOpen) {
-    if (b == WK_CMD_STATUS_REQ) {
+    if (b == CMD_STATUS_REQ) {
       if (_w) _w->writeByte(buildStatusByte());
       return;
     }
-    if (_immCmd == WK_CMD_HOST_OPEN) {
+    
+    if (_immCmd == CMD_HOST_OPEN) {
       handleImmediateParam(b);
+      // Clean up state immediately
       _immCmd = IMMCMD_NONE;
+      _immNeed = 0;
+      _immGot = 0;
       return;
     }
-    if (b == WK_CMD_HOST_OPEN) {
-      _immCmd = WK_CMD_HOST_OPEN;
+    
+    if (b == CMD_HOST_OPEN) {
+      armImm(CMD_HOST_OPEN, 1);
       return;
     }
     return;
@@ -247,7 +241,8 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  if (b == 0x1C || b == 0x18 || b == 0x1A) {
+  // Buffered commands (Fixed constants)
+  if (b == CMD_BUF_SPEED || b == CMD_BUF_PTT || b == CMD_BUF_WAIT) {
     _rxBufferedParamArmed = true;
     rxPush(b);
     _waitingOpcode  = b;
@@ -255,7 +250,7 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  if (b == WK_CMD_STATUS_REQ) {
+  if (b == CMD_STATUS_REQ) {
     uint8_t st = buildStatusByte();
     if (_w) _w->writeByte(st);
     _lastStatusSent   = st;
@@ -263,13 +258,13 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  if (b == WK_CMD_GET_SPEED_POT) {
+  if (b == CMD_GET_SPEED_POT) {
     const uint8_t raw = mapWpmToPotRaw(_k.getWpm());
     if (_w) _w->writeByte(raw);
     return;
   }
 
-  if (b == WK_CMD_CLEAR_BUF) {
+  if (b == CMD_CLEAR_BUF) {
     _rtail = _rhead; 
     _rxBufferedParamArmed = false;
     _waitingOpcode        = 0;
@@ -282,58 +277,45 @@ void TM_WK_Protocol::onByte(uint8_t b) {
     return;
   }
 
-  if (b == WK_CMD_HOST_OPEN) {          
-    _immCmd  = b;
-    _immNeed = 1;
-    _immGot  = 0;
+  if (b == CMD_HOST_OPEN) {          
+    armImm(CMD_HOST_OPEN, 1);
     return;
   }
 
-  if (b == WK_CMD_SIDETONE || b == WK_CMD_SET_WPM_IMM || b == WK_CMD_SET_WEIGHT || b == WK_CMD_KEY_IMMEDIATE) {
-    _immCmd  = b;
-    _immNeed = 1;
-    _immGot  = 0;
+  // Immediate commands (Fixed constants)
+  if (b == CMD_SIDETONE || b == CMD_SET_WPM_IMM || b == CMD_SET_WEIGHT || b == CMD_KEY_IMMEDIATE) {
+    armImm(b, 1);
     return;
   }
 
-  if (b == WK_CMD_SET_PTT_DELAYS) {     
-    _immCmd  = b;
-    _immNeed = 2;
-    _immGot  = 0;
+  if (b == CMD_SET_PTT_DELAYS) {     
+    armImm(b, 2);
     return;
   }
 
-  if (b == WK_CMD_SET_POT_LIMITS) {     
-    _immCmd  = b;
-    _immNeed = 2; 
-    _immGot  = 0;
+  if (b == CMD_SET_POT_LIMITS) {     
+    armImm(b, 2);
     return;
   }
 
-  if (b == WK_CMD_WK2_MODE) {           
-    _immCmd  = b;
-    _immNeed = 1;
-    _immGot  = 0;
+  if (b == CMD_WK2_MODE) {           
+    armImm(b, 1);
     return;
   }
   
-  if (b == WK_CMD_SET_COMP || b == WK_CMD_FIRST_EXTENSION || b == WK_CMD_FARNSWORTH) {
-     _immCmd = b;
-     _immNeed = 1;
-     _immGot = 0;
+  if (b == CMD_SET_COMP || b == CMD_FIRST_EXTENSION || b == CMD_FARNSWORTH) {
+     armImm(b, 1);
      return;
   }
 
+  // Assume ASCII or junk
   rxPush(b);
-}
-
-FLASHMEM void TM_WK_Protocol::handleImmediateCommandByte(uint8_t) {
 }
 
 FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
   switch (_immCmd) {
 
-    case WK_CMD_HOST_OPEN: { 
+    case CMD_HOST_OPEN: { 
 #if WK_INFO_TRACE
       WK_DEBUGF("DBG: RX_CTL <00><%02X>  (HOST_OPEN)\n", (unsigned)p);
 #endif
@@ -372,7 +354,6 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
         _baselineSaved = true;
         
         // --- FORCE INITIAL STATUS ---
-        // Vital for RumLogNG. Safe here in main context.
         if (_w) {
             uint8_t raw    = mapWpmToPotRaw(_baselineWpm);
             uint8_t potMsg = makePotStatusByte(raw);
@@ -435,24 +416,25 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       }
 
       if (change) {
-        wk_play_connect_tune(newOpen);
+        startConnectTune(newOpen);
         _lastStatusSent = WK_STATUS_TAG;
       }
       return;
     }
 
-    case WK_CMD_SIDETONE: { 
+    case CMD_SIDETONE: { 
       break;
     }
 
     // FIX: Consume the parameter for KEY_IMMEDIATE (0x17)
-    case WK_CMD_KEY_IMMEDIATE: {
+    // Using FIXED constant to avoid macro collisions.
+    case CMD_KEY_IMMEDIATE: {
       // Logic for software PTT/Key can be added here if needed.
       // For now, we consume it to avoid the "22" bug.
       break;
     }
     
-    case WK_CMD_SET_WPM_IMM: { 
+    case CMD_SET_WPM_IMM: { 
       uint8_t w = p;
       if (w < TM_WK_WPM_MIN) w = TM_WK_WPM_MIN;
       if (w > TM_WK_WPM_MAX) w = TM_WK_WPM_MAX;
@@ -474,26 +456,26 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       break;
     }
 
-    case WK_CMD_WK2_MODE: {
+    case CMD_WK2_MODE: {
       const uint8_t mode = _immBuf[0];
       _wkModeReg = mode;
       break;
     }
     
-    case WK_CMD_SET_COMP: {
+    case CMD_SET_COMP: {
        _k.setKeyCompensation(p);
        break; 
     }
-    case WK_CMD_FIRST_EXTENSION: {
+    case CMD_FIRST_EXTENSION: {
        _k.setFirstExtension(p);
        break;
     }
-    case WK_CMD_FARNSWORTH: {
+    case CMD_FARNSWORTH: {
        _k.setFarnsworth(p);
        break;
     }
 
-    case WK_CMD_SET_PTT_DELAYS: {
+    case CMD_SET_PTT_DELAYS: {
       const uint8_t lead = _immBuf[0];
       const uint8_t tail = _immBuf[1];
       _pttLeadMs = (uint16_t)lead;
@@ -501,7 +483,7 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       break;
     }
 
-    case WK_CMD_SET_POT_LIMITS: {
+    case CMD_SET_POT_LIMITS: {
       uint8_t hostMin   = _immBuf[0];
       uint8_t hostRange = _immBuf[1];
 
@@ -548,11 +530,11 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       break;
     }
 
-    case WK_CMD_GET_SPEED_POT: {
+    case CMD_GET_SPEED_POT: {
       break;
     }
 
-    case WK_CMD_SET_OUTPUTS: {
+    case CMD_SET_OUTPUTS: {
       break;
     }
 
@@ -655,7 +637,7 @@ void TM_WK_Protocol::onTransportClosed() {
   if (_hostOpen) {
     _hostOpen = false;
     sendStatusIdleNow();
-    wk_play_connect_tune(false);
+    startConnectTune(false);
   }
   _asciiSquelch = false;
   _asciiSquelchUntilMs = 0;
@@ -666,6 +648,46 @@ void TM_WK_Protocol::onTransportClosed() {
 // ========== poll() (Main Loop) ==========
 FLASHMEM void TM_WK_Protocol::poll() {
   
+  // Non-blocking tune state machine
+  #if TM_WK_BEEP_ENABLE
+  if (_tuneState != TUNE_IDLE) {
+      uint32_t now = millis();
+      if ((int32_t)(now - _tuneTimer) > 0) {
+          switch (_tuneState) {
+              case TUNE_TONE1:
+                  Keyer_StopBeep(); 
+                  _tuneTimer = now + 120; 
+                  _tuneState = TUNE_GAP;
+                  break;
+              case TUNE_GAP:
+                  if (_tuneIsConnect) Keyer_Beep(1175, 90);
+                  else                Keyer_Beep(880,  80);
+                  _tuneTimer = now + 90; 
+                  _tuneState = TUNE_TONE2;
+                  break;
+              case TUNE_TONE2:
+                  Keyer_StopBeep(); 
+                  _tuneState = TUNE_IDLE;
+                  break;
+              default:
+                  _tuneState = TUNE_IDLE;
+                  break;
+          }
+      }
+  }
+  #endif
+
+  // FIX: Timeout check for stuck immediate parameters (Escape Hatch)
+  if (_immCmd != IMMCMD_NONE && _immNeed > 0) {
+      if ((int32_t)(millis() - _immSinceMs) > 250) {
+          // Timeout: Drop incomplete command to resync
+          _immCmd = IMMCMD_NONE;
+          _immNeed = 0;
+          _immGot = 0;
+          _immSinceMs = 0;
+      }
+  }
+
   // 1. Process Pending Status Flag
   if (_potStatusPending) {
       if (_w) {
@@ -679,22 +701,29 @@ FLASHMEM void TM_WK_Protocol::poll() {
   // 2. Process Buffered Char Echoes (From ISR)
   if (_w) {
       const uint32_t now = millis();
+      // FIX: use uint8_t mask for ring buffer
       while (_echoHead != _echoTail) {
           _w->writeByte(_echoBuf[_echoTail]);
-          _echoTail = (_echoTail + 1) % ECHO_BUF_SIZE;
+          _echoTail = (_echoTail + 1) & (ECHO_BUF_SIZE - 1);
           _lastHostRxMs = now;
           _lastTxActivityMs = now;
-          sendStatusStartIfNeeded(); // Update status state tracking
+          sendStatusStartIfNeeded(); 
       }
   }
 
   // 3. Process Pending Paddle Status (From ISR)
   if (_paddleStatusPending) {
       _paddleStatusPending = false;
-      if (_w) {
-          uint8_t s = buildStatusByte();
-          _w->writeByte(s);
-          _lastStatusSent = s; 
+      
+      // FIX: Check suppression window here in MAIN loop (Safe from ISR)
+      if (_suppressUnsolicitedUntilMs && (int32_t)(millis() - _suppressUnsolicitedUntilMs) < 0) {
+          // Suppressed - Do nothing
+      } else {
+          if (_w) {
+              uint8_t s = buildStatusByte();
+              _w->writeByte(s);
+              _lastStatusSent = s; 
+          }
       }
   }
 
@@ -720,7 +749,7 @@ FLASHMEM void TM_WK_Protocol::poll() {
     _lastWpmOrigin   = WpmOrigin::None;
   }
 
-  // 6. Timeout check
+  // 6. Timeout check for buffered ops
   if (_waitingOpcode) {
     uint8_t head = 0;
     if (rxPeek(0, head) && head == _waitingOpcode && rxUsed() == 1) {
@@ -755,7 +784,7 @@ FLASHMEM void TM_WK_Protocol::decodeAndExecute() {
   uint8_t b0;
   if (!rxPeek(0, b0)) return;
 
-  if (b0 == WK_CMD_BUF_SPEED) {
+  if (b0 == CMD_BUF_SPEED) {
     uint8_t b1;
     if (!rxPeek(1, b1)) return; 
     uint8_t tmp; rxPop(tmp); rxPop(tmp);
@@ -767,7 +796,7 @@ FLASHMEM void TM_WK_Protocol::decodeAndExecute() {
     return;
   }
 
-  if (b0 == WK_CMD_BUF_PTT) {
+  if (b0 == CMD_BUF_PTT) {
     uint8_t b1;
     if (!rxPeek(1, b1)) return; 
     uint8_t tmp; rxPop(tmp); rxPop(tmp);
@@ -776,7 +805,7 @@ FLASHMEM void TM_WK_Protocol::decodeAndExecute() {
     return;
   }
 
-  if (b0 == WK_CMD_BUF_WAIT) {
+  if (b0 == CMD_BUF_WAIT) {
     uint8_t b1;
     if (!rxPeek(1, b1)) return; 
     uint8_t tmp; rxPop(tmp); rxPop(tmp);
@@ -797,6 +826,9 @@ FLASHMEM void TM_WK_Protocol::decodeAndExecute() {
   if (_asciiSquelch) {
       uint8_t junk = 0; 
       rxPop(junk);
+#if WK_INFO_TRACE
+      WK_DEBUGF("WK: Squelched ASCII 0x%02X\n", junk);
+#endif
       return;
   }
 
