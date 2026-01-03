@@ -130,6 +130,8 @@ static const unsigned long MAX_NET_EVENTS_PER_SEC = 40;
 static unsigned long g_netThrottleStartMs = 0;
 static int g_netEventsCount = 0;
 
+static int g_lastNotifiedWpm = -1;
+
 // Helper function to convert String config to Integer (Safe for ISR)
 void updateKeyOutMode() {
     if (KeyerOut == "LOCAL")         g_isrKeyOutMode = KEYOUT_LOCAL;
@@ -259,32 +261,46 @@ void Keyer_Beep(uint16_t freq, uint16_t ms) {
 
 void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline)
 {
+  // FIX 1: Stale Encoder Guard (Race Condition Protection)
+  // If a WPM update from Host is pending processing in KeyerLoop, 
+  // the current Encoder value passed here is stale. Ignore it to prevent flutter.
+  if (!preserveBaseline && g_wpmUpdatePending) {
+      return; 
+  }
+
   newWpm = TMU_ClampWpm(newWpm); 
 
   // Snapshot volatile variable for safe comparison
   int lastWpm = g_lastHostWpm;
   
-  // FIX: Even if we suppress host echo, we MUST update internal state & engine.
-  // We only skip the "setLocalBaseline" call to prevent the feedback loop.
-  
-  bool isEcho = (!preserveBaseline && newWpm == lastWpm);
-
-  if (!preserveBaseline && newWpm != lastWpm) {
-       g_lastHostWpm = -1; 
-  }
+  // Detect if this is an echo from host
+  // Only treat as echo if tracking is valid (>=0)
+  bool isEcho = (lastWpm >= 0 && newWpm == lastWpm);
 
   CWVal = newWpm;
   
-  // Only report back to host if it's NOT a direct echo of what host just sent
+  // Only report back to host if it's NOT an echo (Local Change)
   if (!preserveBaseline && !isEcho) {
+    // FIX 2: Reset tracking only when we confirm a local change.
+    // This keeps the state machine stable against transient glitches.
+    g_lastHostWpm = -1; 
+    
     CWValSave = CWVal;
     if (TM_WK_Protocol::active()) {
         TM_WK_Protocol::active()->setLocalBaseline((uint8_t)CWVal);
     }
   }
   
+  // Always update internal variables
   WPM = CWVal;
   ElementLen = (1200000L / (WPM > 0 ? WPM : 1));
+
+  // FIX 3: Break the Local Feedback Loop
+  // If this is an echo, KeyerLoop has already handled the Engine and UI updates.
+  if (isEcho) {
+      return;
+  }
+
   g_keyerEngine.setWpm((uint8_t)CWVal);
 
   if (Encoder_9 == Enc9_CWSpeed) {
@@ -336,6 +352,24 @@ void KeyerLoop() {
       
       if (Encoder_9 == Enc9_CWSpeed || Encoder_9 == Enc9_RFPower || Encoder_9 == Enc9_Band) {
           DispCWSpeed();
+      }
+  }
+
+  // -----------------------------------------------------------------------
+  // SYNC FIX: Notify Host if WPM changed externally (e.g. SmartSDR/Radio)
+  // -----------------------------------------------------------------------
+  {
+      if (g_wpmUpdatePending) {
+          // Host update not processed yet; do not notify.
+      } else {
+          const int cur = WPM;
+
+          if (cur != g_lastNotifiedWpm && cur != g_lastHostWpm) {
+              g_lastNotifiedWpm = cur;
+              if (TM_WK_Protocol::active()) {
+                  TM_WK_Protocol::active()->setLocalBaseline((uint8_t)cur);
+              }
+          }
       }
   }
 
