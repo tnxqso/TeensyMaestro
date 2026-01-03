@@ -60,10 +60,13 @@ void TM_WK_Protocol::startConnectTune(bool connect)
   #if TM_WK_BEEP_ENABLE
     _tuneIsConnect = connect;
     _tuneState     = TUNE_TONE1;
-    _tuneTimer     = millis();
-    // Start first tone immediately
-    if (connect) Keyer_Beep(880,  80);
-    else         Keyer_Beep(1175, 90);
+
+    // Start first tone immediately, but don't stop it until its duration has elapsed.
+    const uint16_t t1_ms = connect ? 80 : 90;
+    if (connect) Keyer_Beep(880,  t1_ms);
+    else         Keyer_Beep(1175, t1_ms);
+
+    _tuneTimer = millis() + t1_ms;
   #endif
 }
 
