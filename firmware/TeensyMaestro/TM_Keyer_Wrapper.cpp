@@ -24,17 +24,9 @@
 #include <FlexRigTeensy.h>   
 #include "tm_wk_proto.h"     
 
-// --- Constants (Moved up for visibility) ---
-static const byte LOCAL_KeyOutPin      = 33;
-static const byte LOCAL_StraightKeyPin = 32;
-static const byte LOCAL_STPin          = 34;
-
+    
 // C-hook declaration for Paddle Status
 extern "C" void WK_OnPaddleActivity(bool active);
-// C-hook for Stop Beep (Safe)
-extern "C" void Keyer_StopBeep() {
-    noTone(LOCAL_STPin);
-}
 
 // --- Globals from TeensyMaestro.ino / Other Modules ---
 extern TM_Keyer_Engine g_keyerEngine;
@@ -69,6 +61,15 @@ extern int CWEncSteps;
 // Pins
 extern byte DotPin;
 extern byte DashPin;
+static const byte LOCAL_KeyOutPin      = 33;
+static const byte LOCAL_StraightKeyPin = 32;
+static const byte LOCAL_STPin          = 34;
+
+// External C-hook implementation for Safe Tune Stop
+// Defined here to ensure LOCAL_STPin is visible
+extern "C" void Keyer_StopBeep() {
+    noTone(LOCAL_STPin);
+}
 
 // Globals used by Macros
 extern String MyCall;
@@ -156,15 +157,18 @@ inline void pushNetKey(bool on) {
 void Engine_Wpm_Callback(uint8_t newWpm) {
     newWpm = TMU_ClampWpm(newWpm);
     
-    // IMMEDIATE SUPPRESSION: Update g_lastHostWpm here in ISR.
-    // This closes the tiny race window where an echo might slip through 
-    // before KeyerLoop runs. Using volatile int is safe on Teensy 4.
+    // SAFE: Update ISR state immediately
     g_lastHostWpm = newWpm;
     
-    // DEFER UI/STATE UPDATES:
-    // We still defer heavy stuff (Encoder/Display) to the main loop.
+    // DEFER UI UPDATES!
     g_pendingWpmVal = newWpm;
     g_wpmUpdatePending = true;
+}
+
+// Callback: PTT State Changed
+void Engine_Ptt_Callback(bool on) {
+    // No action for LOCAL mode PTT here.
+    (void)on;
 }
 
 // Callback: Key State Changed (CALLED FROM INTERRUPT)
@@ -257,27 +261,28 @@ void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline)
 {
   newWpm = TMU_ClampWpm(newWpm); 
 
-  if (!preserveBaseline && newWpm == g_lastHostWpm) {
-      CWVal = newWpm;
-      WPM = newWpm;
-      if (Encoder_9 == Enc9_CWSpeed) {
-        CWMicEnc.write(CWVal * CWEncSteps);
-      }
-      return; 
-  }
+  // Snapshot volatile variable for safe comparison
+  int lastWpm = g_lastHostWpm;
+  
+  // FIX: Even if we suppress host echo, we MUST update internal state & engine.
+  // We only skip the "setLocalBaseline" call to prevent the feedback loop.
+  
+  bool isEcho = (!preserveBaseline && newWpm == lastWpm);
 
-  if (!preserveBaseline && newWpm != g_lastHostWpm) {
+  if (!preserveBaseline && newWpm != lastWpm) {
        g_lastHostWpm = -1; 
   }
 
   CWVal = newWpm;
   
-  if (!preserveBaseline) {
+  // Only report back to host if it's NOT a direct echo of what host just sent
+  if (!preserveBaseline && !isEcho) {
     CWValSave = CWVal;
     if (TM_WK_Protocol::active()) {
         TM_WK_Protocol::active()->setLocalBaseline((uint8_t)CWVal);
     }
   }
+  
   WPM = CWVal;
   ElementLen = (1200000L / (WPM > 0 ? WPM : 1));
   g_keyerEngine.setWpm((uint8_t)CWVal);
@@ -315,7 +320,7 @@ void KeyerLoop() {
       }
   }
 
-// 2. Process Deferred WPM Updates (Safe UI Update)
+  // 2. Process Deferred WPM Updates (Safe UI Update)
   if (g_wpmUpdatePending) {
       g_wpmUpdatePending = false;
       int val = g_pendingWpmVal;
@@ -341,8 +346,9 @@ void KeyerLoop() {
       g_netEventsCount = 0;
   }
 
-  // Use masking logic matching the ISR producer
-  while (g_netKeyHead != g_netKeyTail) {
+  // Use local copy of head for atomic consumption check
+  uint8_t head;
+  while ((head = g_netKeyHead) != g_netKeyTail) {
       
       uint8_t  evtState = g_netKeyBuf[g_netKeyTail].state;
       uint16_t evtTime  = g_netKeyBuf[g_netKeyTail].timestamp;
@@ -353,7 +359,7 @@ void KeyerLoop() {
       }
       
       // Advance tail using bitmask
-      g_netKeyTail = (g_netKeyTail + 1) & (NET_KEY_BUF_SIZE - 1);
+      g_netKeyTail = (uint8_t)((g_netKeyTail + 1) & (NET_KEY_BUF_SIZE - 1));
 
       if (g_netEventsCount >= MAX_NET_EVENTS_PER_SEC) {
           continue; 

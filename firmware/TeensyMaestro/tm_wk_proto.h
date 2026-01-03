@@ -88,8 +88,9 @@ static constexpr uint8_t CMD_BUF_SPEED        = 0x1C;
 #ifndef TM_WK_RXBUF_SIZE
   #define TM_WK_RXBUF_SIZE 2048
 #endif
-// Ensure efficient masking logic works
+// Enforce power-of-two for safe bitmasking
 static_assert((TM_WK_RXBUF_SIZE & (TM_WK_RXBUF_SIZE - 1)) == 0, "TM_WK_RXBUF_SIZE must be power of two");
+
 #ifndef TM_WK_WPM_MIN
   #define TM_WK_WPM_MIN 5
 #endif
@@ -156,8 +157,7 @@ private:
   TM_IKeyer&      _k;
   TM_IByteWriter* _w;
 
-  uint32_t        _lastHostRxMs = 0;
-  static constexpr uint16_t ABORT_DROP_QUIET_MS = 120;
+  uint32_t _lastHostRxMs = 0;
 
   uint8_t* _rx;
   bool     _rx_from_extmem = false;
@@ -274,13 +274,11 @@ private:
 
   bool     _asciiReadyBlipArmed = false;
 
-  void sendReadyPulse() FLASHMEM;
   void wk_play_ready_blip() FLASHMEM;
 
   void sendStatusStartIfNeeded() FLASHMEM;
   void sendStatusIdleIfPossible() FLASHMEM;
   void decodeAndExecute() FLASHMEM;
-  void handleImmediateCommandByte(uint8_t b) FLASHMEM;
   void handleImmediateParam(uint8_t param) FLASHMEM;
 
   static bool isAscii(uint8_t b) { return b >= 0x20; }

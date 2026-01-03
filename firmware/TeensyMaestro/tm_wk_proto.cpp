@@ -129,6 +129,8 @@ FLASHMEM void TM_WK_Protocol::setLocalBaseline(uint8_t wpm) {
 // Safe: Sets flag only. No millis().
 void TM_WK_Protocol::onPaddleActivity(bool /*active*/) {
     if (!_hostOpen) return;
+    
+    // Flag update only. Squelch check happens in poll().
     _paddleStatusPending = true;
 }
 
@@ -354,6 +356,7 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
         _baselineSaved = true;
         
         // --- FORCE INITIAL STATUS ---
+        // Vital for RumLogNG. Safe here in main context.
         if (_w) {
             uint8_t raw    = mapWpmToPotRaw(_baselineWpm);
             uint8_t potMsg = makePotStatusByte(raw);
@@ -362,7 +365,10 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
         }
 
       } else if (p == 0x03) {    // DISCONNECT
-        onProtoClosed();
+        _hostOpen = false;       // Mark session as closed
+        onProtoClosed();         // Reset protocol state
+        sendStatusIdleNow();     // Send final status
+        startConnectTune(false); // Play disconnect tune
         return;
       } else if (p == 0x04) {    // EchoTest
         _adminEchoPending = true;
@@ -424,6 +430,17 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
 
     case CMD_SIDETONE: { 
       break;
+    }
+
+    case CMD_SET_WEIGHT: {
+       uint8_t w = p;
+       // WinKey weight is typically 10..90
+       if (w < 10) w = 10;
+       if (w > 90) w = 90;
+       setWeight(w); // Update internal state
+       // Pass to engine if supported (WinKey 50 = 50% ratio)
+       // _k.setWeightPermille(w * 10); 
+       break;
     }
 
     // FIX: Consume the parameter for KEY_IMMEDIATE (0x17)
@@ -591,15 +608,12 @@ FLASHMEM void TM_WK_Protocol::sendStatusIdleIfPossible() {
   }
 }
 
-FLASHMEM void TM_WK_Protocol::sendReadyPulse() {
-  if (_w) {
-    _w->writeByte(WK_READY_PULSE);
-  }
-}
-
 FLASHMEM void TM_WK_Protocol::wk_play_ready_blip() {
   wk_play_short_tone();
   _asciiSquelch = false;
+#if WK_INFO_TRACE
+  WK_DEBUGF("WK: ASCII squelch released (ready)\n");
+#endif
 }
 
 FLASHMEM void TM_WK_Protocol::sendStatusIdleNow() {
@@ -609,6 +623,9 @@ FLASHMEM void TM_WK_Protocol::sendStatusIdleNow() {
     _w->writeByte(WK_STATUS_TAG); 
     _lastStatusSent   = WK_STATUS_TAG;
     _lastStatusSentMs = millis();
+#if WK_RX_TRACE    
+    WK_DEBUGLN(F("DBG: TX_STATUS(idle-now) 0xC0"));
+#endif
   }
 }
 
@@ -701,12 +718,19 @@ FLASHMEM void TM_WK_Protocol::poll() {
   // 2. Process Buffered Char Echoes (From ISR)
   if (_w) {
       const uint32_t now = millis();
+      bool sentAny = false;
+      
       // FIX: use uint8_t mask for ring buffer
       while (_echoHead != _echoTail) {
           _w->writeByte(_echoBuf[_echoTail]);
           _echoTail = (_echoTail + 1) & (ECHO_BUF_SIZE - 1);
           _lastHostRxMs = now;
           _lastTxActivityMs = now;
+          sentAny = true;
+      }
+      
+      // Optimization: Only update status ONCE after draining the buffer
+      if (sentAny) {
           sendStatusStartIfNeeded(); 
       }
   }
