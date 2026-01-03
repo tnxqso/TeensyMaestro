@@ -209,43 +209,25 @@ void onTransmit_speed()
   debugln(mode);
 
   // Only react in CW
-  const bool isCW = (mode == "CW");
-  if (!isCW) {
+  if (mode != "CW") {
     debugln("onTransmit_speed: non-CW -> ignore");
     return;
   }
 
-  // Read reported WPM from radio
+  // Read reported WPM from radio (do NOT apply here)
   const int reported = fRig.transmit.speed;
   debug("onTransmit_speed: reported=");
   debugln(reported);
 
-  // Guard invalid/missing values
   if (reported <= 0) {
     debugln("onTransmit_speed: invalid (<=0) -> ignore");
     return;
   }
 
-  // Optional clamp to a sane CW range; adjust if you prefer different bounds
-  int clamped = reported;
-  if (clamped < 5)  clamped = 5;
-  if (clamped > 60) clamped = 60;
-
-  // Apply only if changed
-  if (clamped != CWVal) {
-    CWVal     = clamped;
-    CWValSave = CWVal;
-
-    debug("onTransmit_speed: applied=");
-    debugln(CWVal);
-
-    if (Encoder_9 == Enc9_CWSpeed && !MenuActive) {
-      CWMicEnc.write(CWVal * CWEncSteps);
-      DispCWSpeed();
-    }
-  } else {
-    debugln("onTransmit_speed: no change");
-  }
+  // Signal main loop to adopt/sync WPM through the single authoritative path.
+  // This ensures Keyer_Apply_Wpm() runs, which updates engine/UI and notifies WK host.
+  GotSpeedParm = true;
+  debugln("onTransmit_speed: flagged GotSpeedParm");
 }
 
 

@@ -128,7 +128,7 @@ volatile bool g_sidetoneState   = false;
 // 5. Throttle
 static const unsigned long MAX_NET_EVENTS_PER_SEC = 40;
 static unsigned long g_netThrottleStartMs = 0;
-static int g_netEventsCount = 0;
+volatile uint32_t g_netEventsCount = 0;
 
 static int g_lastNotifiedWpm = -1;
 
