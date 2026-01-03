@@ -19,6 +19,11 @@
 
 #include "tm_wk_proto.h"
 
+// Enable chirps
+#ifndef TM_WK_BEEP_ENABLE
+#define TM_WK_BEEP_ENABLE 1
+#endif
+
 // EXTMEM allocation APIs (Teensy 4.1)
 extern "C" void* extmem_malloc(size_t size);
 extern "C" void  extmem_free(void* ptr);
