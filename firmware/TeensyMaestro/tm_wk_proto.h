@@ -113,6 +113,11 @@ public:
   
   void setLocalBaseline(uint8_t wpm);
 
+  // Notify host about an exte_lastHostSetWpmrnal (radio-originated) WPM change.
+  // Arms a short holdoff window to prevent the host from immediately overwriting
+  // the radio with stale speed values (SmartSDR snap-back).
+  void setExternalBaseline(uint8_t wpm);
+
   void onByte(uint8_t b);
   void onKeyerCharEcho(uint8_t ch);
   void onPaddleActivity(bool active); 
@@ -220,6 +225,12 @@ private:
   uint8_t  _baselineWeight        = 50;
 
   static constexpr uint16_t HOST_ECHO_WINDOW_MS = 400;
+  // When we adopt WPM from the radio and notify the host, some logging software
+  // may immediately resend its previous WPM. Ignore conflicting host WPM updates
+  // for a short window to prevent SmartSDR "snap-back".
+  uint32_t _externalWpmHoldUntilMs = 0;
+  uint8_t  _lastExternalWpm        = 0xFF;
+  static constexpr uint16_t EXTERNAL_WPM_HOLDOFF_MS = 600;
 
   uint8_t  _lastHostSetWpm   = 0xFF;
   uint32_t _lastHostSetMs    = 0;

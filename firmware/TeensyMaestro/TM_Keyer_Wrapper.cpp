@@ -367,7 +367,7 @@ void KeyerLoop() {
           if (cur != g_lastNotifiedWpm && cur != g_lastHostWpm) {
               g_lastNotifiedWpm = cur;
               if (TM_WK_Protocol::active()) {
-                  TM_WK_Protocol::active()->setLocalBaseline((uint8_t)cur);
+                  TM_WK_Protocol::active()->setExternalBaseline((uint8_t)cur);
               }
           }
       }

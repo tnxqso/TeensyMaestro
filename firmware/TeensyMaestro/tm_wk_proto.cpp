@@ -133,6 +133,12 @@ FLASHMEM void TM_WK_Protocol::setLocalBaseline(uint8_t wpm) {
     _potStatusPending = true;
 }
 
+FLASHMEM void TM_WK_Protocol::setExternalBaseline(uint8_t wpm) {
+    _lastExternalWpm = wpm;
+    _externalWpmHoldUntilMs = millis() + EXTERNAL_WPM_HOLDOFF_MS;
+    setLocalBaseline(wpm);
+}
+
 // === PADDLE ACTIVITY HANDLER (ISR) ===
 // Safe: Sets flag only. No millis().
 void TM_WK_Protocol::onPaddleActivity(bool /*active*/) {
@@ -466,6 +472,19 @@ FLASHMEM void TM_WK_Protocol::handleImmediateParam(uint8_t p) {
       
       if (w < _potMinWpm) w = _potMinWpm;
       if (w > (_potMinWpm + _potRangeWpm)) w = (_potMinWpm + _potRangeWpm);
+
+      // External holdoff: if we just notified the host about a radio-originated
+      // WPM change, ignore conflicting host WPM updates for a short window.
+      if (_externalWpmHoldUntilMs &&
+          (int32_t)(millis() - _externalWpmHoldUntilMs) < 0) {
+          if (_lastExternalWpm != 0xFF && w != _lastExternalWpm) {
+#if WK_WARN_TRACE
+              WK_DEBUGF("WK: ignoring host WPM %u during external holdoff (ext=%u)\n",
+                        (unsigned)w, (unsigned)_lastExternalWpm);
+#endif
+              break;
+          }
+      }
 
       _lastHostImmediateWpm = w;
       setWpmProvenance(w, WpmOrigin::HostImmediate, F("host <02>"));
