@@ -101,6 +101,12 @@ void ResetScreenSaver(const char* reason /*= nullptr*/)
   ScreenSaveTimer = millis();
   if (ScreenSaveActive)
   {
+    // FIX: Ensure pins are still set to INPUT_PULLUP.
+    // This resolves "dead paddles" if pin configuration was lost during sleep/screensaver.
+    pinMode(DotPin, INPUT_PULLUP);
+    pinMode(DashPin, INPUT_PULLUP);
+    pinMode(StraightKeyPin, INPUT_PULLUP);
+    
     muxA.digitalWrite(IOX_TFT_LCD, HIGH);  // Turn panel back on immediately
     ScreenSaveActive = false;
     Splash           = false;

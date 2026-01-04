@@ -1239,6 +1239,12 @@ void loop()
   bool pinDash     = (digitalRead(DashPin) == LOW);
   bool pinStraight = (digitalRead(StraightKeyPin) == LOW);
 
+  if (ScreenSaveActive) {
+     if (pinDot || pinDash || pinStraight) {
+         ResetScreenSaver("Keyer Activity");
+     }
+  }
+
   // Handle Handedness (Swap if left-handed)
   // 'Handed' variable comes from global settings (0=Right, 1=Left)
   bool logicalDot  = (Handed == 0) ? pinDot : pinDash;
