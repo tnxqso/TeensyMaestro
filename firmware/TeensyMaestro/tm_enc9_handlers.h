@@ -74,9 +74,19 @@ static inline void TM_SerNum_SaveEEPROM_Throttled(uint16_t min_interval_ms = 750
 static void HandleEnc9_CWSpeed() {
   const int raw    = enc_read_quantized(CWMicEnc, CWEncSteps);
   const int newWpm = TMU_ClampWpm(raw);
+  
+  // Exit immediately if the value hasn't changed from the last processed state
   if (newWpm == CWValSave) return;
 
   ResetScreenSaver("Enc9: CW/Mic/RF");
+
+  // CRITICAL FIX: Manually update CWValSave here.
+  // We cannot rely on Keyer_Apply_Wpm() to do it, because if it detects 
+  // an "echo" from the radio, it skips updating CWValSave.
+  // If we don't update it here, 'newWpm == CWValSave' above remains false,
+  // causing an infinite loop of repeated commands.
+  CWValSave = newWpm;
+
   enc_write_quantized(CWMicEnc, newWpm, CWEncSteps);
   Keyer_Apply_Wpm(newWpm, /*preserveBaseline=*/false);
 
@@ -84,9 +94,20 @@ static void HandleEnc9_CWSpeed() {
     const bool headless = FlexIsHeadless();
     String mode;
     const bool haveMode = TMU_TxModeKnown(mode);
-    //const bool isCw     = TMU_TxIsCw();
-    if (headless || (haveMode)) {
-      fRig.setCwSpeed(newWpm);
+    const bool isCw     = TMU_TxIsCw(); // Uncommented: Vital to prevent SSB storms
+    
+    // LOGIC: Only sync to radio if:
+    // 1. Not Headless (PC is connected, per your design requirement)
+    // 2. We know the mode.
+    // 3. The mode is actually CW (Prevents sending CW commands in SSB, which caused the crash)
+    if (!headless && haveMode && isCw) {
+      
+      // TRAFFIC GUARD: Only send command if the radio value actually differs.
+      // This prevents feedback loops where the radio confirms a value, 
+      // and we immediately send it back, creating a network storm.
+      if (fRig.transmit.speed != newWpm) {
+        fRig.setCwSpeed(newWpm);
+      }
     }
   }
 }
