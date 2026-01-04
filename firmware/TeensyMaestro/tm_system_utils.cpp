@@ -179,6 +179,12 @@ int TMU_GetReportedCwWpm() {
     return TMU_ClampWpm(CWVal);
   }
 
+  /* 
+     NOTE: CWX check disabled. 
+     We rely on transmit.speed as the authoritative source for the physical knob.
+     Prioritizing CWX here previously masked the real issue in transmit.speed.
+  */
+  /*
   if (fRig.cwx.wpm > 0) {
     const int w = TMU_ClampWpm(fRig.cwx.wpm);
   #if DEBUG_WPM && DEBUG_WPM_GETTER_VERBOSE
@@ -186,10 +192,25 @@ int TMU_GetReportedCwWpm() {
   #endif
     return w;
   }
+  */
 
   String mode;
   if (TMU_TxModeKnown(mode) && TMU_TxIsCw() && fRig.transmit.speed > 0) {
     const int w = TMU_ClampWpm(fRig.transmit.speed);
+
+    // --- BUG FIX: The 5 WPM Profile Glitch ---
+    // The FlexRadio firmware temporarily reports 'speed=5' (factory default)
+    // inside the transmit status message during a Global Profile load.
+    // SOLUTION: If the radio reports exactly 5 WPM, but our local knob 
+    // is set to something else, we treat the 5 as a transient glitch and ignore it.
+    if (w == 5 && CWVal != 5) {
+    #if DEBUG_WPM && DEBUG_WPM_GETTER_VERBOSE
+       DLOG_WPM("[WPM] IGNORED glitch 5 WPM from radio. Keeping local %d.\n", CWVal);
+    #endif
+       return TMU_ClampWpm(CWVal);
+    }
+    // -----------------------------------------
+
   #if DEBUG_WPM && DEBUG_WPM_GETTER_VERBOSE
     DLOG_WPM("[WPM] Fallback tx.speed=%d → %d (mode=%s)\n",
              fRig.transmit.speed, w, mode.c_str());
