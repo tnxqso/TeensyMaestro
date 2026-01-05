@@ -101,12 +101,15 @@ void ResetScreenSaver(const char* reason /*= nullptr*/)
   ScreenSaveTimer = millis();
   if (ScreenSaveActive)
   {
-    // FIX: Ensure pins are still set to INPUT_PULLUP.
-    // This resolves "dead paddles" if pin configuration was lost during sleep/screensaver.
-    pinMode(DotPin, INPUT_PULLUP);
-    pinMode(DashPin, INPUT_PULLUP);
-    pinMode(StraightKeyPin, INPUT_PULLUP);
-    
+    // FIX: Restart the Keyer Engine.
+    // After long periods of inactivity, the engine's internal timing 
+    // or interrupts may stop/freeze. This forces a logic restart.
+    g_keyerEngine.begin();
+
+    // Safety: Restore the current WPM speed immediately, 
+    // as begin() typically resets the engine to a default speed.
+    g_keyerEngine.setWpm((uint8_t)CWVal);
+
     muxA.digitalWrite(IOX_TFT_LCD, HIGH);  // Turn panel back on immediately
     ScreenSaveActive = false;
     Splash           = false;
