@@ -62,9 +62,14 @@ bool FlexRig::isEffectiveHeadless() const {
 }
 
 // --- Probe sender with built-in logging ---
-// Sends one small UDP probe ("TMVITA") to the radio.
-// Guard clauses prevent invalid destination or null IP access.
-// Logging is inside this function so any caller path will emit logs.
+// Sends a small UDP packet ("TMVITA") to the radio's VITA port.
+// PURPOSE: UDP Hole Punching (NAT Traversal).
+// Even on local LANs, firewalls or NAT routers usually block unsolicited 
+// INCOMING UDP streams. By sending an OUTGOING packet first, we force the 
+// network equipment to create a connection tracking entry, allowing the 
+// high-bandwidth VITA-49 stream from the radio to pass back to us.
+// This is unrelated to DNS/IP resolution; it is strictly for firewall permissions.
+
 inline void sendVitaProbe(EthernetUDP& udp, const byte* ip, uint16_t dstPort) {
   // Validate arguments first
   if (!ip) {
