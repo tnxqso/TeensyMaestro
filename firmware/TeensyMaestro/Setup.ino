@@ -105,7 +105,7 @@ FLASHMEM void TeensyMaestroSetup()
   // --- Display Initialization ---
   TM_DisplayBringUp();
   UI_Boot::showInitialBanner();
-  
+
   // --- IO Expander / Button Mapping ---
   buttonMap[BTN_NONE]             = { -1, -1, "BTN_NONE" };
   buttonMap[BTN_VFO_A_MUTE_SLICE] = { 0, 0, "BTN_VFO_A_MUTE_SLICE" };
@@ -213,7 +213,7 @@ FLASHMEM void TeensyMaestroSetup()
     for (int i = 0; i < 4; ++i) if ( (a[i] & mask[i]) != (b[i] & mask[i]) ) return false;
     return true;
   };
-  
+
   if (CFG_ConnMode == TM_CONN_FIXED || CFG_ConnMode == TM_CONN_FIXED_FAILOVER) {
     // Resolve CFG_FlexHost -> CFG_FlexIp[] (literal or DNS)
     if (TM_ComputeFlexTargetIP()) {
@@ -280,7 +280,7 @@ FLASHMEM void TeensyMaestroSetup()
     LoadAntennaMenu();
     LoadClientMenu();
   }
-  
+
   // Load CW menus (these are local to the keyer or messages)
   LoadCWMsgMenu();
   LoadCWMenu();
@@ -314,7 +314,7 @@ FLASHMEM void TeensyMaestroSetup()
     {
       GotBtn = (getFirstButtonPress() != BTN_NONE);
     }
-    
+
     // Force GUI client if button held or no ID yet
     if (!DisableGUIClient && (GotBtn || fRig.Client_ID[0] == ""))
     {
@@ -416,7 +416,7 @@ FLASHMEM void TeensyMaestroSetup()
 
     // ----------------------- OTHER RADIO INIT ----------------------------
     SaveBkInDelay = fRig.transmit.break_in_delay;
-    
+
     // Apply CW Delay logic if we are using Network keying (Ethernet OR Both)
     if (KeyerOut == "ETHERNET" || KeyerOut == "BOTH") {
       // Apply CW Delay only if configured (non-zero)
@@ -569,7 +569,7 @@ FLASHMEM void TeensyMaestroSetup()
 
   touch.begin();
   touch.setRotation(3);  // Match TFT rotation for landscape mode (same axes as screen)
-  
+
   touch.readData(&TPX, &TPY, &TPZ);
   if (TPX == 4095 && TPY == 0 && TPZ == 255)  // Trick value to show that no controller is connected
   {
@@ -618,22 +618,22 @@ FLASHMEM void ShutDownCB()
 // --------------------------------------------------------------------------
 FLASHMEM bool TM_TryConnectLoop(const char* serialNum, unsigned long timeoutMs) {
   unsigned long start = millis();
-  
+
   // Keep trying until connected, standalone mode is forced, or timeout
   while (!fRig.connected && !StandAlone) {
-    
+
     // 1. Discovery phase
     if (serialNum && strlen(serialNum) > 0) {
       // Find specific radio
       fRig = FlexRig::findAFlex(serialNum);
     } else {
       // Find any radio (Auto)
-      fRig = FlexRig::findAFlex(""); 
+      fRig = FlexRig::findAFlex("");
     }
 
     // 2. Connection phase
     // If discovery found a valid candidate (serial is populated), try to connect
-    if (fRig.serial[0] != 0) { 
+    if (fRig.serial[0] != 0) {
        fRig.connect();
     }
 
@@ -732,7 +732,7 @@ FLASHMEM void TM_AttemptFlexConnect()
           snprintf(gFixedEndpointLabel, sizeof(gFixedEndpointLabel),
           "%s:%d", hostDisp.c_str(), CFG_FlexControlPort);
 
-          gFixedEndpointUsed = true; 
+          gFixedEndpointUsed = true;
           if (!fRig.ensureIdentity(1500)) {
             debugln("Identity via TCP 'info' not complete within 1.5s (model/serial/version may appear later).");
           }
@@ -749,10 +749,10 @@ FLASHMEM void TM_AttemptFlexConnect()
     // Note: If mode is strictly FIXED and direct failed, we do NOT enter here (correct behavior).
     if (CFG_ConnMode == TM_CONN_AUTO ||
         (CFG_ConnMode == TM_CONN_FIXED_FAILOVER && (!tried_direct || (tried_direct && !direct_ok)))) {
-      
+
       UI_Boot::Prog(BootStage::DiscoverFlex, F("Discovering Flex radios..."));
       debugln("===Looking for Flex Rig (UDP)===");
-      
+
       // Use helper with 10s timeout, empty string means "Find ANY"
       TM_TryConnectLoop("", 10000);
     }
@@ -794,7 +794,7 @@ FLASHMEM void TM_AttemptFlexConnect()
       );
     } else {
       debugln(fRig.serial);
-      
+
       // Short final wait to ensure we’re fully connected (handshake completion)
       unsigned long t0 = millis();
       while (!fRig.connected && !StandAlone) {
