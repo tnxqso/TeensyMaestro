@@ -950,6 +950,8 @@ String HandedTxt;
 
 volatile bool KeyDown    = false;
 String KeyerOut          = "LOCAL";  // LOCAL, ETHERNET or BOTH
+String GreetingText      = "HI";     // Boot greeting via sidetone; empty = disabled (max 128 chars)
+volatile bool g_greetingActive = false; // true while greeting state machine is running
 String KeyMode           = "B";      //A, B, U
 volatile bool KeyPressed = false;
 
@@ -1222,6 +1224,39 @@ static void ProcessMicSelDebounce()
 #include "tm_enc_agc_bw_handlers.h"
 #include "tm_enc_vfo_vol_handlers.h"
 
+// -----------------------------------------------------------------------
+// Boot greeting — enqueues GreetingText into the keyer engine.
+// Engine_Key_Callback suppresses LOCAL_KeyOutPin and pushNetKey() while
+// g_greetingActive is true, so only the sidetone speaker fires.
+// -----------------------------------------------------------------------
+static void ProcessGreeting() {
+    static bool    s_started    = false;
+    static uint8_t s_readyCount = 0;
+
+    if (s_started) {
+        // Clear the flag once the engine finishes playing
+        if (g_greetingActive && !g_keyerEngine.isBusy()) {
+            g_greetingActive = false;
+        }
+        return;
+    }
+
+    if (!g_systemReady || GreetingText.length() == 0) return;
+
+    // Skip the first few loop() iterations after g_systemReady.
+    // The very first iteration runs one-time init inside ClockWidget_Loop()
+    // and MTP.loop() which can extend that iteration well past one dit period,
+    // causing the deferred tone() for the first dot to fire too late.
+    // Three iterations is enough to clear any first-boot overhead.
+    if (s_readyCount < 3) { s_readyCount++; return; }
+
+    s_started = true;
+    g_greetingActive = true;
+    for (size_t i = 0; i < GreetingText.length(); i++) {
+        g_keyerEngine.enqueueChar(GreetingText[i]);
+    }
+}
+
 /***************************** loop ***************************/
 void loop()
 {
@@ -1230,6 +1265,7 @@ void loop()
   TMTime_loop();
   ClockWidget_Loop();
   KeyerLoop();
+  ProcessGreeting();
 
   // --------------------------------------------------------------
   // PADDLE INPUT LOGIC (Moved from ISR to Polling)

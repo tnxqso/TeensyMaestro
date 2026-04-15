@@ -18,19 +18,19 @@
 
 #include <Arduino.h>
 #include "TM_Keyer_Engine.h"
-#include "TM_Macro_Engine.h" 
-#include "tm_system_utils.h" 
-#include "Encoder.h"         
-#include <FlexRigTeensy.h>   
-#include "tm_wk_proto.h"     
+#include "TM_Macro_Engine.h"
+#include "tm_system_utils.h"
+#include "Encoder.h"
+#include <FlexRigTeensy.h>
+#include "tm_wk_proto.h"
 
-    
+
 // C-hook declaration for Paddle Status
 extern "C" void WK_OnPaddleActivity(bool active);
 
 // --- Globals from TeensyMaestro.ino / Other Modules ---
 extern TM_Keyer_Engine g_keyerEngine;
-extern FlexRig* g_fRig; 
+extern FlexRig* g_fRig;
 
 // Settings / State
 extern volatile int CWVal;
@@ -42,7 +42,7 @@ extern int STFreq;
 extern volatile bool AbortMsg;
 extern volatile bool KeyDown;
 extern bool OldKeyDown;
-extern String KeyerOut;  
+extern String KeyerOut;
 extern volatile unsigned int CWIndex;
 extern int ClientMenuItem;
 
@@ -81,6 +81,7 @@ TM_Macro_Engine g_macroEngine(g_keyerEngine);
 // Forward declarations
 void DispCWSpeed();
 extern bool DoRigPTT(bool on);
+extern volatile bool g_greetingActive; // set/cleared by ProcessGreeting() in TeensyMaestro.ino
 
 // Missing Linker Fixes
 volatile bool g_KeyerTimingActive = false;
@@ -100,7 +101,7 @@ volatile int g_lastHostWpm = -1;
 #define KEYOUT_LOCAL    1
 #define KEYOUT_ETHERNET 2
 #define KEYOUT_BOTH     3
-volatile uint8_t g_isrKeyOutMode = KEYOUT_LOCAL; 
+volatile uint8_t g_isrKeyOutMode = KEYOUT_LOCAL;
 
 // 2. Network Keying Buffer
 struct NetKeyEvt {
@@ -108,7 +109,7 @@ struct NetKeyEvt {
     uint16_t timestamp; // millis() % 0xFFFF
 };
 
-static const int NET_KEY_BUF_SIZE = 64; 
+static const int NET_KEY_BUF_SIZE = 64;
 // Enforce power-of-two for safe bitmasking logic
 static_assert((NET_KEY_BUF_SIZE & (NET_KEY_BUF_SIZE - 1)) == 0, "NET_KEY_BUF_SIZE must be power of two");
 
@@ -144,7 +145,7 @@ void updateKeyOutMode() {
 inline void pushNetKey(bool on) {
     // Masking is faster than modulus and safe for power-of-two sizes
     uint8_t next = (uint8_t)((g_netKeyHead + 1) & (NET_KEY_BUF_SIZE - 1));
-    if (next != g_netKeyTail) { 
+    if (next != g_netKeyTail) {
         g_netKeyBuf[g_netKeyHead].state = on ? 1 : 0;
         g_netKeyBuf[g_netKeyHead].timestamp = 0; // Timestamp filled in main loop
         g_netKeyHead = next;
@@ -158,10 +159,10 @@ inline void pushNetKey(bool on) {
 // Callback: WPM Changed by Macro/Host (MAY RUN IN ISR)
 void Engine_Wpm_Callback(uint8_t newWpm) {
     newWpm = TMU_ClampWpm(newWpm);
-    
+
     // SAFE: Update ISR state immediately
     g_lastHostWpm = newWpm;
-    
+
     // DEFER UI UPDATES!
     g_pendingWpmVal = newWpm;
     g_wpmUpdatePending = true;
@@ -175,8 +176,8 @@ void Engine_Ptt_Callback(bool on) {
 
 // Callback: Key State Changed (CALLED FROM INTERRUPT)
 void Engine_Key_Callback(bool on) {
-  
-  KeyDown = on; 
+
+  KeyDown = on;
   if (on) {
       if (!OldKeyDown) OldKeyDown = true;
   } else {
@@ -185,10 +186,17 @@ void Engine_Key_Callback(bool on) {
 
   // FIX: Always update pending state.
   // This ensures tone stops if SideTone is disabled mid-key.
-  g_sidetoneState   = (on && SideTone);
+  // During the boot greeting, allow sidetone regardless of the SideTone setting.
+  g_sidetoneState   = (on && (SideTone || g_greetingActive));
   g_sidetonePending = true;
 
-  uint8_t mode = g_isrKeyOutMode; 
+  // During boot greeting: sidetone fires normally via the deferred path,
+  // but hardware key output and network keying are suppressed.
+  if (g_greetingActive) {
+      return;
+  }
+
+  uint8_t mode = g_isrKeyOutMode;
 
   // Handle LOCAL physical keying
   if (mode == KEYOUT_LOCAL || mode == KEYOUT_BOTH) {
@@ -220,24 +228,24 @@ void KeyerSetup() {
   pinMode(DotPin, INPUT_PULLUP);
   pinMode(DashPin, INPUT_PULLUP);
   pinMode(LOCAL_StraightKeyPin, INPUT_PULLUP);
-  
+
   pinMode(LOCAL_KeyOutPin, OUTPUT);
   pinMode(LOCAL_STPin, OUTPUT);
 
-  digitalWriteFast(LOCAL_KeyOutPin, LOW); 
+  digitalWriteFast(LOCAL_KeyOutPin, LOW);
 
   g_KeyerTimingActive = false;
-  
+
   // Update the ISR-safe mode flag
   updateKeyOutMode();
 
   g_keyerEngine.begin();
-  
+
   g_keyerEngine.attachKeyCallback(Engine_Key_Callback);
   g_keyerEngine.attachPttCallback(Engine_Ptt_Callback);
   g_keyerEngine.attachWpmChangeCallback(Engine_Wpm_Callback);
   g_keyerEngine.attachCharSentCallback(Engine_CharSent_Callback);
-  g_keyerEngine.attachPaddleActivityCallback(Engine_Paddle_Callback); 
+  g_keyerEngine.attachPaddleActivityCallback(Engine_Paddle_Callback);
 
   if (WPM < 5) WPM = 20;
   g_keyerEngine.setWpm((uint8_t)WPM);
@@ -262,35 +270,35 @@ void Keyer_Beep(uint16_t freq, uint16_t ms) {
 void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline)
 {
   // FIX 1: Stale Encoder Guard (Race Condition Protection)
-  // If a WPM update from Host is pending processing in KeyerLoop, 
+  // If a WPM update from Host is pending processing in KeyerLoop,
   // the current Encoder value passed here is stale. Ignore it to prevent flutter.
   if (!preserveBaseline && g_wpmUpdatePending) {
-      return; 
+      return;
   }
 
-  newWpm = TMU_ClampWpm(newWpm); 
+  newWpm = TMU_ClampWpm(newWpm);
 
   // Snapshot volatile variable for safe comparison
   int lastWpm = g_lastHostWpm;
-  
+
   // Detect if this is an echo from host
   // Only treat as echo if tracking is valid (>=0)
   bool isEcho = (lastWpm >= 0 && newWpm == lastWpm);
 
   CWVal = newWpm;
-  
+
   // Only report back to host if it's NOT an echo (Local Change)
   if (!preserveBaseline && !isEcho) {
     // FIX 2: Reset tracking only when we confirm a local change.
     // This keeps the state machine stable against transient glitches.
-    g_lastHostWpm = -1; 
-    
+    g_lastHostWpm = -1;
+
     CWValSave = CWVal;
     if (TM_WK_Protocol::active()) {
         TM_WK_Protocol::active()->setLocalBaseline((uint8_t)CWVal);
     }
   }
-  
+
   // Always update internal variables
   WPM = CWVal;
   ElementLen = (1200000L / (WPM > 0 ? WPM : 1));
@@ -321,7 +329,7 @@ void Keyer_AbortNow(void) {
 
 // THIS IS CALLED FROM MAIN LOOP (SAFE FOR NETWORK & UI)
 void KeyerLoop() {
-  
+
   // 0. Sync Keyer Mode (in case it changed via Menu)
   updateKeyOutMode();
 
@@ -340,7 +348,7 @@ void KeyerLoop() {
   if (g_wpmUpdatePending) {
       g_wpmUpdatePending = false;
       int val = g_pendingWpmVal;
-      
+
       // Update remaining state variables here
       // (g_lastHostWpm was already set in ISR for immediate safety)
       CWVal = val;
@@ -349,7 +357,7 @@ void KeyerLoop() {
       if (Encoder_9 == Enc9_CWSpeed) {
           CWMicEnc.write(val * CWEncSteps);
       }
-      
+
       if (Encoder_9 == Enc9_CWSpeed || Encoder_9 == Enc9_RFPower || Encoder_9 == Enc9_Band) {
           DispCWSpeed();
       }
@@ -383,20 +391,20 @@ void KeyerLoop() {
   // Use local copy of head for atomic consumption check
   uint8_t head;
   while ((head = g_netKeyHead) != g_netKeyTail) {
-      
+
       uint8_t  evtState = g_netKeyBuf[g_netKeyTail].state;
       uint16_t evtTime  = g_netKeyBuf[g_netKeyTail].timestamp;
-      
+
       // Fix timestamp here in main loop if it was deferred
       if (evtTime == 0) {
           evtTime = (uint16_t)(now & 0xFFFF);
       }
-      
+
       // Advance tail using bitmask
       g_netKeyTail = (uint8_t)((g_netKeyTail + 1) & (NET_KEY_BUF_SIZE - 1));
 
       if (g_netEventsCount >= MAX_NET_EVENTS_PER_SEC) {
-          continue; 
+          continue;
       }
 
       if (g_fRig && g_fRig->connected) {
@@ -410,10 +418,10 @@ void KeyerLoop() {
 
           if (txSlice >= 0 && g_fRig->slice[txSlice].mode == "CW" && g_fRig->transmit.break_in == 1) {
               char buf[128];
-              snprintf(buf, sizeof(buf), "cw key %d time=0x%X index=%u client_handle=%s", 
+              snprintf(buf, sizeof(buf), "cw key %d time=0x%X index=%u client_handle=%s",
                   evtState,
-                  evtTime, 
-                  (unsigned)CWIndex++, 
+                  evtTime,
+                  (unsigned)CWIndex++,
                   g_fRig->Client_Handle[ClientMenuItem].c_str());
 
               g_fRig->send(buf);
@@ -450,7 +458,7 @@ void SendFlexMsg(int M)
     {
       char buf[32];
       snprintf(buf, sizeof(buf), "cwx macro send %d", M);
-      g_fRig->send(buf);   
+      g_fRig->send(buf);
       break;
     }
   }

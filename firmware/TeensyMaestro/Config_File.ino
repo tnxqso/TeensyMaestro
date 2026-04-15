@@ -46,6 +46,7 @@ extern int KeyerCompensation;
 extern int KeyerFirstExtension;
 extern int KeyerFarnsworth;
 extern bool KeyerAutospace;
+extern String GreetingText;
 
 // ------ Lightweight stats carrier for one config load ------
 struct ConfigLoadStats {
@@ -1400,6 +1401,18 @@ if (InSetup && InBufUC.indexOf("CW FARNSWORTH:") >= 0) {
     } else {
       setParseError("Keyer Out", v, "must be 'Local', 'Ethernet', or 'Both'");
       return;
+    }
+    return;
+  }
+
+  // Greeting Text: <up to 128 chars>  (empty string is valid and disables the greeting)
+  if (InSetup && InBufUC.indexOf("GREETING TEXT:") >= 0) {
+    int k = tm_index_of_key_ci(line, "Greeting Text:");
+    if (k >= 0) {
+      String v = line.substring(k + 14); // 14 = strlen("Greeting Text:")
+      v.trim();
+      if (v.length() > 128) v = v.substring(0, 128);
+      GreetingText = v; // empty is intentional: disables the greeting
     }
     return;
   }
