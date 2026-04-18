@@ -1,9 +1,9 @@
 # TeensyMaestro WinKey Emulation (TM WK)
 
-TeensyMaestro Community Edition includes a built-in **WinKeyer emulator** (“TM WK”) so your logging or contest software can treat TeensyMaestro as if it were a classic **K1EL WinKeyer**.
+TeensyMaestro Community Edition includes a built-in **WinKeyer emulator** ("TM WK") so your logging or contest software can treat TeensyMaestro as if it were a classic **K1EL WinKeyer**.
 
-The goal is simple:  
-You use your favorite logging program (DXLog, N1MM, SkookumLogger, etc.), select **WinKey** as the interface – and TeensyMaestro sends CW for you with proper timing.
+The goal is simple:
+You use your favorite logging program (DXLog, N1MM, SkookumLogger, etc.), select **WinKey** as the interface, and TeensyMaestro sends CW for you with proper timing.
 
 This document explains what TM WK does, what it does **not** do, and what you should expect as a user.
 
@@ -13,29 +13,31 @@ This document explains what TM WK does, what it does **not** do, and what you sh
 
 TM WK makes TeensyMaestro behave like a **WinKey2-compatible CW keyer** over:
 
-- A **serial (USB) port**, and/or  
+- A **serial (USB) port**, and/or
 - A **TCP port** (WinKey over network).
 
 Your logging program:
 
 - Opens a connection (serial or TCP),
 - Thinks it is talking to a K1EL WinKeyer,
-- Sends text (“CQ TEST …”) and commands (speed changes, abort, etc.),
+- Sends text ("CQ TEST ...") and commands (speed changes, abort, etc.),
 - TM WK does all the Morse timing and keys your radio.
 
 You do **not** need to know protocol details; that is handled by TeensyMaestro.
+
+Under the hood, TM WK rides on top of CE's rewritten CW keyer engine, which was built from the ground up with responsive paddle and host timing as the primary goals.
 
 ---
 
 ## 2. What you can do with TM WK
 
-From the logging program’s point of view, TM WK is a normal WinKeyer. You can:
+From the logging program's point of view, TM WK is a normal WinKeyer. You can:
 
 - Send **CW messages/macros** (CQ, TU, exchange, etc.).
 - Adjust **speed (WPM)** from the logging software.
 - Adjust **speed from the physical knob** on TeensyMaestro, and have that reflected back to the software.
 - Use **paddle input** locally (TeensyMaestro keyer) while the software is connected.
-- Use the **WinKey “Abort/Clear Buffer” (ESC)** function in the logger to stop a message.
+- Use the **WinKey "Abort/Clear Buffer" (ESC)** function in the logger to stop a message.
 - Use **temporary speed changes inside a macro** (for example, faster call sign, slower report) when the logger supports it.
 
 The intent is that if your software works with a real WinKey2, it should work in essentially the same way with TM WK.
@@ -44,18 +46,24 @@ The intent is that if your software works with a real WinKey2, it should work in
 
 ## 3. Supported and tested environments
 
-TM WK has been exercised with:
+TM WK has been tested by the CE maintainers with:
 
 - **DXLog.net** (Windows, WinKey over TCP and Serial)
 - **SkookumLogger** (macOS, WinKey over Serial)
-- Other WinKey-aware loggers should work as long as they follow the WinKey v2 protocol correctly.
+
+Users have also reported successful operation with:
+
+- **N1MM Logger+** (Windows)
+- **DXLab Suite** (Windows)
+
+Other WinKey-aware loggers should work as long as they follow the WinKey v2 protocol correctly.
 
 If something behaves differently than with a real WinKey:
 
 - It is either a **missing feature** in TM WK, or
 - A **corner case** in how that logger uses the protocol.
 
-In that case, SD traces / logs are extremely valuable to track down differences.
+In that case, SD traces and logs are extremely valuable to track down differences.
 
 ---
 
@@ -65,14 +73,14 @@ In that case, SD traces / logs are extremely valuable to track down differences.
 
 In your logger you typically select:
 
-- **Device / Interface**: WinKey or WinKey2  
+- **Device / Interface**: WinKey or WinKey2
 - **Port**:
-  - Serial: the TeensyMaestro COM port  
+  - Serial: the TeensyMaestro COM port
   - TCP: the IP address of TeensyMaestro and the WinKey TCP port configured in TM
 
 Once connected:
 
-- The logger sends an “open” command.
+- The logger sends an "open" command.
 - TM WK replies with a **firmware revision code** (as a real WinKey would).
 - After that, the logger treats TeensyMaestro as a WinKey unit.
 
@@ -89,7 +97,7 @@ Once connected:
 
 ## 5. Abort / ESC behavior
 
-From the logger’s perspective, pressing **ESC** (or “Clear Buffer”) should:
+From the logger's perspective, pressing **ESC** (or "Clear Buffer") should:
 
 - Stop any CW that is currently sending,
 - Clear all queued text,
@@ -101,40 +109,35 @@ TM WK implements the WinKey **Clear Buffer** command with the following logic:
   - Transmission stops immediately.
   - Internal text queue is cleared.
   - Any partially received macro bytes are discarded (so the next macro starts clean).
-  - TM WK sends an “idle” status back to the logger.
+  - TM WK sends an "idle" status back to the logger.
 
 - If the keyer is **idle** (no text queued, no macro in progress), ESC is treated as **spurious/stale**:
   - Nothing happens internally.
-  - This is to avoid accidentally discarding the *next* macro if the logger sends a “late” ESC after everything is already finished.
+  - This is to avoid accidentally discarding the *next* macro if the logger sends a "late" ESC after everything is already finished.
 
 This design is tuned so that:
 
-- Rapid “ESC → send new macro” sequences from the host do not cause messages to be lost,
-- Background or “stuck” ESC bursts from certain loggers do not corrupt upcoming messages.
+- Rapid "ESC -> send new macro" sequences from the host do not cause messages to be lost,
+- Background or "stuck" ESC bursts from certain loggers do not corrupt upcoming messages.
 
-If you see different behavior in your logger (e.g. ESC seemingly ignored), a protocol trace usually reveals whether the logger’s ESC is sent at a time when the keyer is already fully idle.
+If you see different behavior in your logger (e.g. ESC seemingly ignored), a protocol trace usually reveals whether the logger's ESC is sent at a time when the keyer is already fully idle.
 
 ---
 
-## 6. What TM WK currently does **not** emulate fully
+## 6. Scope and known limitations
 
-TM WK focuses on the parts of WinKey that **real loggers actually use in practice**.
+TM WK implements the parts of WinKey that mainstream loggers use in practice. A few areas are deliberately simplified for now:
 
-Some areas are simplified or partially implemented:
+- **Weighting / element shaping.** The `weighting` register is stored and round-trips correctly with the host, but current builds do not yet apply a shaping model to the keyed output. In normal contest use this is rarely noticed.
+- **Rare admin / diagnostic commands.** A few seldom-used admin queries reply in a compatible but simplified way (for example, returning sensible defaults rather than tracking every internal state).
+- **WinKey3-only features.** Features that are specific to WinKey3 and not normally exercised by major logging programs are not implemented.
 
-- **Detailed weighting / element shaping**:  
-  The “weight” setting is stored, but current builds do not yet apply a sophisticated shaping model. In normal contest use this is rarely noticed.
-- **Certain admin/diagnostic commands**:  
-  Some obscure or rarely used admin queries are replied to in a compatible but simplified way (for example always reporting certain defaults).
-- **Exotic modes / options**:  
-  Some features of WinKey3 that are not normally exposed by major logging programs may be ignored.
-
-The goal is that **no mainstream logger** should fail to work because of these simplifications. If you hit a limitation, please report:
+The goal is that no mainstream logger should fail to work because of these simplifications. If you do hit a limitation, please report:
 
 - Which program and version you use,
 - What you tried to do,
 - What you expected vs. what happened,
-- Any trace/log file you can provide.
+- Any trace or log file you can provide.
 
 ---
 
@@ -142,28 +145,28 @@ The goal is that **no mainstream logger** should fail to work because of these s
 
 If your logger does not behave as expected with TM WK:
 
-1. **Check the chosen interface type**  
-   - It must be configured as **WinKey** / **WinKey2**, not CAT, not “straight keyer”, etc.
+1. **Check the chosen interface type**
+   - It must be configured as **WinKey** / **WinKey2**, not CAT, not "straight keyer", etc.
 
-2. **Check the port and speed**  
+2. **Check the port and speed**
    - Serial: correct COM port, 1200 baud, 8 data bits, 2 stop bits, no parity (unless the logger explicitly says otherwise for WinKey).
    - TCP: correct IP and port (as configured in TeensyMaestro).
 
-3. **Start simple**  
-   - Send a very short macro, e.g. `TEST TEST TEST`, and verify it sends once and stops.  
+3. **Start simple**
+   - Send a very short macro, e.g. `TEST TEST TEST`, and verify it sends once and stops.
    - Then test ESC in the middle of a longer message.
 
-4. **Watch for double keyers**  
+4. **Watch for double keyers**
    - Make sure you are not accidentally keying the radio from both the logger and another device at the same time.
 
-5. **If problems remain**  
+5. **If problems remain**
    - Capture a **WinKey trace** / SD log from TeensyMaestro that covers:
      - Program startup / connect,
      - Sending a macro,
      - Pressing ESC (or the abort function) once or twice.
-   - Send that log along with a short description (“pressed ESC about halfway through the word TEST”).
+   - Send that log along with a short description ("pressed ESC about halfway through the word TEST").
 
-This level of information is usually enough to see whether the issue is in the logger’s usage of WinKey protocol or in TM WK’s emulation.
+This level of information is usually enough to see whether the issue is in the logger's usage of WinKey protocol or in TM WK's emulation.
 
 ---
 

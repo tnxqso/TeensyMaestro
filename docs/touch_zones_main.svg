@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 440" font-family="Arial, Helvetica, sans-serif" font-size="10">
+  <!-- Title -->
+  <text x="280" y="18" text-anchor="middle" font-size="14" font-weight="bold">TeensyMaestro CE - Main Screen Touch Zones</text>
+  <text x="280" y="32" text-anchor="middle" font-size="10" fill="#555">ST7796 display, 480 &#215; 320 pixels, origin top-left</text>
+
+  <!-- Screen background -->
+  <rect x="40" y="40" width="480" height="320" fill="#f5f5f5" stroke="#222" stroke-width="2"/>
+
+  <!-- Pixel coordinate markers -->
+  <text x="40" y="54" font-size="8" fill="#999">(0,0)</text>
+  <text x="520" y="54" text-anchor="end" font-size="8" fill="#999">(479,0)</text>
+  <text x="40" y="356" font-size="8" fill="#999">(0,319)</text>
+  <text x="520" y="356" text-anchor="end" font-size="8" fill="#999">(479,319)</text>
+
+  <!-- Top bar -->
+  <rect x="40" y="40" width="96" height="64" fill="#4a90e2" fill-opacity="0.75" stroke="#222"/>
+  <text x="88" y="68" text-anchor="middle" fill="white" font-weight="bold">Top0</text>
+  <text x="88" y="82" text-anchor="middle" fill="white" font-size="8">Select</text>
+  <text x="88" y="92" text-anchor="middle" fill="white" font-size="8">Slice A</text>
+
+  <rect x="136" y="40" width="150" height="64" fill="#4a90e2" fill-opacity="0.75" stroke="#222"/>
+  <text x="211" y="68" text-anchor="middle" fill="white" font-weight="bold">Top1</text>
+  <text x="211" y="82" text-anchor="middle" fill="white" font-size="8">Toggle TX</text>
+  <text x="211" y="92" text-anchor="middle" fill="white" font-size="8">Slice A</text>
+
+  <rect x="286" y="40" width="124" height="64" fill="#4a90e2" fill-opacity="0.75" stroke="#222"/>
+  <text x="348" y="72" text-anchor="middle" fill="white" font-weight="bold">Top2</text>
+  <text x="348" y="86" text-anchor="middle" fill="white" font-size="8">Split</text>
+
+  <rect x="410" y="40" width="110" height="64" fill="#4a90e2" fill-opacity="0.75" stroke="#222"/>
+  <text x="465" y="68" text-anchor="middle" fill="white" font-weight="bold">Top3</text>
+  <text x="465" y="82" text-anchor="middle" fill="white" font-size="8">Toggle TX</text>
+  <text x="465" y="92" text-anchor="middle" fill="white" font-size="8">Slice B</text>
+
+  <!-- Dead zone below top -->
+  <rect x="40" y="104" width="480" height="20" fill="#555" fill-opacity="0.35" stroke="none"/>
+  <text x="280" y="118" text-anchor="middle" fill="#222" font-size="8" font-style="italic">Dead zone (ignored)</text>
+
+  <!-- Center area -->
+  <rect x="40" y="124" width="480" height="152" fill="#50c878" fill-opacity="0.5" stroke="#222"/>
+  <text x="280" y="190" text-anchor="middle" font-weight="bold" font-size="14">CenterArea</text>
+  <text x="280" y="210" text-anchor="middle" font-size="10">Short press: open Profile Selector</text>
+  <text x="280" y="224" text-anchor="middle" font-size="10">Long press (700 ms+): toggle CW / SSB</text>
+
+  <!-- Dead zone above bottom -->
+  <rect x="40" y="276" width="480" height="20" fill="#555" fill-opacity="0.35" stroke="none"/>
+  <text x="280" y="290" text-anchor="middle" fill="#222" font-size="8" font-style="italic">Dead zone (ignored)</text>
+
+  <!-- Bottom bar -->
+  <rect x="40" y="296" width="96" height="64" fill="#f5a623" fill-opacity="0.75" stroke="#222"/>
+  <text x="88" y="320" text-anchor="middle" fill="white" font-weight="bold" font-size="9">BottomLeft</text>
+  <text x="88" y="332" text-anchor="middle" fill="white" font-weight="bold" font-size="9">_Splash</text>
+  <text x="88" y="348" text-anchor="middle" fill="white" font-size="8">Hold to show</text>
+
+  <rect x="136" y="296" width="150" height="64" fill="#bbb" fill-opacity="0.6" stroke="#777" stroke-dasharray="4,2"/>
+  <text x="211" y="326" text-anchor="middle" fill="#333" font-weight="bold">Bottom1</text>
+  <text x="211" y="340" text-anchor="middle" fill="#333" font-size="8" font-style="italic">reserved</text>
+
+  <rect x="286" y="296" width="124" height="64" fill="#bbb" fill-opacity="0.6" stroke="#777" stroke-dasharray="4,2"/>
+  <text x="348" y="326" text-anchor="middle" fill="#333" font-weight="bold">Bottom2</text>
+  <text x="348" y="340" text-anchor="middle" fill="#333" font-size="8" font-style="italic">reserved</text>
+
+  <rect x="410" y="296" width="110" height="64" fill="#bbb" fill-opacity="0.6" stroke="#777" stroke-dasharray="4,2"/>
+  <text x="433" y="326" text-anchor="middle" fill="#333" font-weight="bold">Bottom3</text>
+  <text x="433" y="340" text-anchor="middle" fill="#333" font-size="8" font-style="italic">reserved</text>
+
+  <!-- Reset button overlay (takes priority) -->
+  <rect x="456" y="296" width="64" height="64" fill="#e74c3c" fill-opacity="0.9" stroke="#222" stroke-width="2"/>
+  <text x="488" y="320" text-anchor="middle" fill="white" font-weight="bold" font-size="11">Reset</text>
+  <text x="488" y="334" text-anchor="middle" fill="white" font-size="8">Short: soft</text>
+  <text x="488" y="346" text-anchor="middle" fill="white" font-size="8">Long: hard</text>
+
+  <!-- Legend -->
+  <text x="40" y="384" font-size="11" font-weight="bold">Legend</text>
+
+  <rect x="40" y="392" width="12" height="12" fill="#4a90e2" fill-opacity="0.75" stroke="#222"/>
+  <text x="58" y="402">Top bar (slice / TX control)</text>
+
+  <rect x="230" y="392" width="12" height="12" fill="#50c878" fill-opacity="0.5" stroke="#222"/>
+  <text x="248" y="402">Center (profile / mode selection)</text>
+
+  <rect x="420" y="392" width="12" height="12" fill="#f5a623" fill-opacity="0.75" stroke="#222"/>
+  <text x="438" y="402">Active bottom zone</text>
+
+  <rect x="40" y="414" width="12" height="12" fill="#e74c3c" fill-opacity="0.9" stroke="#222"/>
+  <text x="58" y="424">Reset (priority over Bottom3)</text>
+
+  <rect x="230" y="414" width="12" height="12" fill="#bbb" fill-opacity="0.6" stroke="#777" stroke-dasharray="4,2"/>
+  <text x="248" y="424">Reserved (not wired up)</text>
+
+  <rect x="420" y="414" width="12" height="12" fill="#555" fill-opacity="0.35"/>
+  <text x="438" y="424">Dead zone (touches ignored)</text>
+</svg>

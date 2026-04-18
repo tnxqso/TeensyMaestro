@@ -1,13 +1,13 @@
-# TeensyMaestro — Community Edition (CE)
+# TeensyMaestro - Community Edition (CE)
 
-**Community-maintained open-source edition of TeensyMaestro for FlexRadio 6000, 8000, and Aurora radios.**  
+**Community-maintained open-source edition of TeensyMaestro for FlexRadio 6000, 8000, and Aurora radios.**
 Based on the original [TeensyMaestro by Len Koppl (KD0RC)](https://github.com/KD0RC/Teensy-Maestro-for-Flex-6000-radios).
 
 ---
 
 ## 🧩 Overview
 
-TeensyMaestro — Community Edition (CE) is a non-commercial, open-source firmware for the **Teensy 4.1** microcontroller.  
+TeensyMaestro - Community Edition (CE) is a non-commercial, open-source firmware for the **Teensy 4.1** microcontroller.
 It provides a rich front-panel control interface for FlexRadio transceivers, focusing on usability, network resilience, and expandability.
 
 This firmware is intended for technically inclined users who are comfortable flashing microcontrollers and working with community-supported software.
@@ -17,8 +17,8 @@ This firmware is intended for technically inclined users who are comfortable fla
 ## ⚙️ Hardware Support
 
 - **Supported:** TeensyMaestro Hardware Version 2 (only)
-  - Display: ST7796 (480×320) with XPT2046 touchscreen  
-  - I/O expanders: MCP23017 (main) + optional MCP23008 muxes  
+  - Display: ST7796 (480×320) with XPT2046 touchscreen
+  - I/O expanders: MCP23017 (main) + optional MCP23008 muxes
 
 - **Not supported:** TeensyMaestro Hardware Version 1
 
@@ -30,16 +30,27 @@ If you are not sure which hardware revision you have, assume it is **not** suppo
 
 There are two main ways to get TeensyMaestro CE onto your **Teensy 4.1**:
 
-1. **Recommended:** Flash the latest prebuilt firmware from GitHub Releases.  
+1. **Recommended:** Flash the latest prebuilt firmware from GitHub Releases.
 2. **Advanced:** Build the firmware yourself and flash your own binary.
 
 For almost all users, **option 1 is strongly recommended**.
 
-### ✅ Option 1 – Use a prebuilt firmware (recommended)
+In addition to flashing the firmware, you also need to place the CE version of `MMConfig.ini` on the SD card (see below). Both pieces are required for CE to operate correctly.
 
-1. Go to the TeensyMaestro CE Releases page:  
+### 📋 Required: Install the CE version of MMConfig.ini on the SD card
+
+TeensyMaestro CE uses an extended version of `MMConfig.ini` with additional configuration keys. The CE file format differs from the original TeensyMaestro's; always use the CE version bundled in this repository.
+
+1. Download the CE version from:
+   `https://raw.githubusercontent.com/tnxqso/TeensyMaestro/refs/heads/main/firmware/TeensyMaestro/config/MMConfig.ini`
+2. Place it in the **root** of the SD card that you use with your TeensyMaestro.
+3. Start with minimal edits. The syntax is strict and a single malformed line can prevent TeensyMaestro from starting correctly. Get the radio working with the supplied configuration first, then add customisations incrementally and test after each change.
+
+### ✅ Option 1 - Use a prebuilt firmware (recommended)
+
+1. Go to the TeensyMaestro CE Releases page:
    `https://github.com/tnxqso/TeensyMaestro/releases`
-2. Download the **latest release** for TeensyMaestro CE (HEX file or the “compiled binary” bundle).
+2. Download the **latest release** for TeensyMaestro CE (HEX file or the "compiled binary" bundle).
 3. Install the official **Teensy Loader** application from PJRC (Windows/macOS/Linux).
 4. Connect your TeensyMaestro v2 (with Teensy 4.1) to your computer via USB.
 5. In Teensy Loader:
@@ -48,10 +59,10 @@ For almost all users, **option 1 is strongly recommended**.
    - Click **Program** and wait until the flashing process finishes.
 6. Power-cycle or reset the TeensyMaestro, and the new CE firmware should start.
 
-This is the easiest and safest way to run TeensyMaestro CE.  
-If you only want to use the firmware and not modify the code, **do not bother setting up a build environment.**
+This is the easiest and safest way to run TeensyMaestro CE.
+If you only want to use the firmware and not modify the code, **do not bother setting up a build environment**.
 
-### 🧠 Option 2 – Build the firmware yourself (advanced)
+### 🧠 Option 2 - Build the firmware yourself (advanced)
 
 Only consider this if you are already comfortable with:
 
@@ -59,95 +70,126 @@ Only consider this if you are already comfortable with:
 - PlatformIO, or equivalent build systems
 - Debugging toolchain and environment issues on your own
 
-The environment used and tested by the CE maintainers is roughly:
-
-- **Platform:** `teensy`
-- **Framework:** `arduino`
-- **Board:** `teensy41`
-
-From a typical PlatformIO build:
-
-- Platform: Teensy (5.0.0) → Teensy 4.1  
-  - Hardware: IMXRT1062 @ 600 MHz, 512 KB RAM, 7.75 MB Flash  
-  - Debug: jlink (external)
-
-Tooling packages:
-
-- `framework-arduinoteensy @ 1.159.0 (1.59)`
-- `tool-teensy @ 1.159.0 (1.59)`
-- `toolchain-gccarmnoneeabi-teensy @ 1.110301.0 (11.3.1)`
-
-Dependency graph (libraries typically pulled in):
-
-- AceTime @ 4.1.0  
-- T4_PowerButton @ 0.0.4+sha.71de116  
-- Adafruit MCP23017 Arduino Library @ 2.3.2  
-- KickSort @ 1.1.0  
-- FlexRigTeensy-TNXQSO @ 0.1.0  
-- AceCommon @ 1.6.2  
-- AceSorting @ 1.0.0  
-- ST7796_t3 @ 1.0.0-local  
-- SPI @ 1.0  
-- NativeEthernet  
-- FNET @ 0.1.3  
-- SD @ 2.0.0  
-- SdFat @ 2.1.2  
-- MTP_Teensy @ 1.0.0  
-- Encoder @ 1.4.4  
-- EEPROM @ 2.0  
-- Wire @ 1.0  
-- XPT2046_Touchscreen  
-- Adafruit BusIO @ 1.17.4  
-
-Typical memory usage at the time of writing (example build):
-
-- `FLASH:` code ≈ 533,912 bytes, data ≈ 182,784 bytes, headers ≈ 8,776 bytes  
-  free for files ≈ 7,400,992 bytes
-- `RAM1:` variables ≈ 73,956 bytes, code ≈ 325,096 bytes, padding ≈ 2,584 bytes  
-  free for local variables ≈ 122,652 bytes
-- `RAM2:` variables ≈ 75,168 bytes  
-  free for `malloc/new` ≈ 449,120 bytes
-
-These numbers are provided **for orientation only**; they will change as the code evolves.
+The CE maintainers build against **Teensy 4.1** using the `teensy` platform and `arduino` framework under PlatformIO. For the exact library versions and build configuration, see `platformio.ini` in the repository; that file is the single source of truth and stays in sync with the code as the project evolves.
 
 #### Important build-support disclaimer
 
 - Setting up a working build environment for TeensyMaestro CE is **non-trivial**.
 - The TM CE team maintainers **do not provide support** for:
-  - PlatformIO installation problems  
-  - Toolchain issues  
-  - Local library version conflicts  
-  - General “how do I build this?” questions
+  - PlatformIO installation problems
+  - Toolchain issues
+  - Local library version conflicts
+  - General "how do I build this?" questions
 
-If you are an experienced developer, this should be enough information to get going.  
+If you are an experienced developer, this should be enough information to get going.
 If you are not, you are much better off **sticking to the prebuilt firmware from GitHub Releases**.
 
 ---
 
 ## 🌐 Key Features
 
-- **WinKeyer v2 Emulation**
-  - Acts as a fully-featured, K3NG/K1EL-compliant CW keyer over TCP or a virtual serial port.
-  - Features a non-blocking, poll-based architecture for precise, jitter-free timing.
-  - Supports advanced WinKeyer features like **Weighting**, **Keying Compensation**, **First Extension**, and **Farnsworth Timing**.
-  - Provides full **break-in** support, allowing paddle input to correctly interrupt and take over from macros or host transmissions.
-  - Targeted for use with logging/contest software such as **DXLog**, **N1MM**, **SkookumLogger**, and others.
-  - See `WK_README.md` and `WINKEYER_PROTOCOL_V2_EMULATION.md` for complete details.
+- **WinKeyer v2 Emulation (TM WK)**
+  - Presents TeensyMaestro as a K1EL WinKeyer v2-compatible CW keyer over either USB serial or TCP, so most logging and contest software can key the radio through TeensyMaestro with no special driver.
+  - Non-blocking, poll-based timing; paddle input can break in and take over from host-generated CW.
+  - Host and front-panel WPM stay in sync; speed changes flow both ways.
+  - WinKey "Clear Buffer" (ESC) is honoured for in-flight CW and ignored when the keyer is already idle, to avoid eating the next macro.
+  - Tested with **DXLog.net**, **N1MM**, **DXLab**, and **SkookumLogger**. Other WinKey v2-capable loggers should work.
+  - Some areas are deliberately simplified: the `weighting` register is stored but not yet applied to element shaping, and a few rarely-used admin queries return compatible defaults. See `WK_README.md` and `WINKEYER_PROTOCOL_V2_EMULATION.md` for details.
 
-- **STUN/NAT Traversal and Fixed-IP Operation**  
-  - Supports remote operation even when your TeensyMaestro is behind NAT or firewalls.  
-  - Suitable for fixed-station and “remote shack” setups.
+- **STUN/NAT Traversal and Fixed-IP Operation**
+  - Supports remote operation even when your TeensyMaestro is behind NAT or firewalls.
+  - Suitable for fixed-station and "remote shack" setups.
 
-- **NTP Support**  
-  - Periodically synchronizes the internal clock against NTP servers.  
+- **NTP Support**
+  - Periodically synchronizes the internal clock against NTP servers.
   - Ensures accurate UTC display for logging and contest operation.
 
-- **Enhanced User Interface**  
-  - Clock widget and cleaner slice displays.  
+- **Enhanced User Interface**
+  - Clock widget and cleaner slice displays.
   - Tweaked layouts and visual consistency for Hardware v2.
 
-- **Hardware v2 Optimisations**  
+- **Hardware v2 Optimisations**
   - Tuned specifically for the ST7796 display and MCP23017-based front panel found on Hardware v2.
+
+---
+
+## 🔀 Differences from original TeensyMaestro
+
+TeensyMaestro CE adds a number of things on top of the original firmware by Len Koppl (KD0RC). The notable additions, in rough order of user impact:
+
+- **Rewritten keyer engine.** CE's CW keyer is a ground-up rewrite with responsiveness and paddle feel as the primary design goals. Non-blocking timing, break-in handling, and paddle response are tuned for smooth interactive use.
+- **WinKeyer v2 emulation (TM WK).** CE includes a built-in WinKeyer v2 emulator so contest and logging software can key your radio through TeensyMaestro over USB serial or TCP. See the Key Features section and `WK_README.md` for details.
+- **Extended MMConfig.ini.** CE recognises additional configuration keys. The CE and original configuration files are not interchangeable; always use the CE version from this repository (see the installation section).
+- **Touch screen layout.** CE defines a specific set of touch zones including a Profile Selector modal (bands and modes), a soft/hard Reset region in the lower right, and a splash overlay in the lower left corner. See the Touch Zones section below.
+- **STUN/NAT traversal and fixed-IP operation.** CE includes infrastructure for remote operation through NAT or a firewall.
+- **NTP clock sync and clock widget.** CE periodically syncs its internal clock via NTP and shows it on the main screen.
+
+---
+
+## 👆 Touch Zones
+
+TeensyMaestro CE uses a specific touch-zone layout on the ST7796 480×320 display. The map below applies to the **main screen** during normal operation (no modal open).
+
+![Main screen touch zones](docs/touch_zones_main.svg)
+
+### Main screen zones
+
+| Zone | Pixel bounds (x1, y1) - (x2, y2) | Short press | Long press (700 ms+) |
+|---|---|---|---|
+| `Top0` | (0, 0) - (96, 64) | Select Slice A | (logged only) |
+| `Top1` | (96, 0) - (246, 64) | Toggle TX on Slice A | (logged only) |
+| `Top2` | (246, 0) - (370, 64) | Split: create Slice B from A | (logged only) |
+| `Top3` | (370, 0) - (480, 64) | Toggle TX on Slice B | (logged only) |
+| `CenterArea` | (0, 84) - (480, 236) | Open Profile Selector modal | Toggle CW / SSB |
+| `BottomLeft_Splash` | (0, 256) - (96, 320) | Hold to show splash overlay; releases on lift | (no long-press threshold) |
+| `Bottom1` | (96, 256) - (246, 320) | Reserved | Reserved |
+| `Bottom2` | (246, 256) - (370, 320) | Reserved | Reserved |
+| `Bottom3` | (370, 256) - (480, 320) | Reserved | Reserved |
+| `ResetButton` | (416, 256) - (480, 320) | Soft reset (redraw + screensaver reset) | Hard MCU reset |
+
+Two narrow horizontal strips at `y=64..84` and `y=236..256` are dead zones that intentionally ignore touches to reduce accidental activation between the top, center, and bottom rows.
+
+The `ResetButton` sits inside the right portion of `Bottom3`. Reset is hit-tested first and takes priority, so `Bottom3` never fires in that corner. This is intentional.
+
+### Profile Selector modal - Bands page
+
+Opened by a short press in `CenterArea`. Full-screen grid of 3 × 4 cells, 152×72 px with 6 px gaps.
+
+| Zone | Pixel bounds | Action |
+|---|---|---|
+| `Band_160m` | (6, 6) - (158, 78) | Select 160 m, advance to Modes page |
+| `Band_80m` | (158, 6) - (310, 78) | Select 80 m |
+| `Band_60m` | (310, 6) - (462, 78) | Select 60 m |
+| `Band_40m` | (6, 78) - (158, 150) | Select 40 m |
+| `Band_30m` | (158, 78) - (310, 150) | Select 30 m |
+| `Band_20m` | (310, 78) - (462, 150) | Select 20 m |
+| `Band_17m` | (6, 150) - (158, 222) | Select 17 m |
+| `Band_15m` | (158, 150) - (310, 222) | Select 15 m |
+| `Band_12m` | (310, 150) - (462, 222) | Select 12 m |
+| `Band_10m` | (6, 222) - (158, 294) | Select 10 m |
+| `Band_6m` | (158, 222) - (310, 294) | Select 6 m |
+| `Bands_Cancel` | (310, 222) - (462, 294) | Close selector, return to main screen |
+
+### Profile Selector modal - Modes page
+
+Appears after a band is chosen. 2 × 3 cells, 228×96 px with 8 px gaps. A 200 ms arm-guard prevents an accidental "through-press" from the Bands page.
+
+| Zone | Pixel bounds | Enabled for | Action |
+|---|---|---|---|
+| `Mode_SSB` | (8, 8) - (236, 104) | All bands except 30 m | Load profile, close selector |
+| `Mode_CW` | (244, 8) - (472, 104) | All bands | Load profile, close selector |
+| `Mode_FM` | (8, 104) - (236, 200) | 10 m and 6 m only | Load profile, close selector |
+| `Mode_DIGU` | (244, 104) - (472, 200) | All bands | Load profile, close selector |
+| `Mode_Empty` | (8, 200) - (236, 296) | Never (disabled slot) | Ignored |
+| `Modes_Cancel` | (244, 200) - (472, 296) | Always | Close selector, return to main screen |
+
+### Menu screen
+
+When the menu is open (`MenuActive == true`), the display switches to a list view. Each visible menu row is a full-width touch strip, 21 px tall, stacked from the top. A short press on row `N` writes `N × CWEncSteps` to the menu encoder, equivalent to moving the encoder to that item and clicking it. The number of rows is dynamic and depends on how many items the current menu contains.
+
+### Developer notes
+
+The main-screen touch dispatch lives in `tm_touch.h`. The Profile Selector modal is handled in `tm_profile_select.cpp`. Raw-touch-to-pixel calibration constants are in `tm_touch_helpers.h`. The main touch entry point is in `TeensyMaestro.ino` (look for `GotTouch` and `TouchDispatch`).
 
 ---
 
@@ -167,30 +209,30 @@ Before you open an issue or ask for help, please read and follow these points:
 
 If you suspect a bug in CE:
 
-1. Check whether the same behavior occurs with the **original, official TeensyMaestro firmware** from Len’s repository.
+1. Check whether the same behavior occurs with the **original, official TeensyMaestro firmware** from Len's repository.
 2. If the problem **also** exists there, it is not a CE-specific bug. In that case:
-   - Search Len’s GitHub and documentation to see if it is a known limitation.
+   - Search Len's GitHub and documentation to see if it is a known limitation.
    - Only report it upstream if it clearly looks like a bug in the original firmware.
 3. Only if the issue is unique to CE should you open an issue in the **CE repository**.
 
-In short:  
-**If it’s broken in both original and CE, it’s not our bug alone.  
-If it’s only broken in CE, then it’s ours.**
+In short:
+**If it's broken in both original and CE, it's not our bug alone.
+If it's only broken in CE, then it's ours.**
 
 ### 3. How to open a useful GitHub issue
 
 When you are sure the problem is CE-specific, use GitHub Issues in the usual way:
 
 - Clearly state:
-  - **Radio model and firmware**,  
-  - **TeensyMaestro CE version / commit**,  
-  - **PC OS, logger software, and version** (e.g. “Windows 11, DXLog 2.x, N1MM 1.x”, “macOS + SkookumLogger”).
+  - **Radio model and firmware**,
+  - **TeensyMaestro CE version / commit**,
+  - **PC OS, logger software, and version** (e.g. "Windows 11, DXLog 2.x, N1MM 1.x", "macOS + SkookumLogger").
 - Describe:
   - What you **expected** to happen.
   - What **actually** happened.
   - Whether the issue is reproducible and **exact steps** to reproduce it.
 - Attach:
-  - Relevant logs (e.g. **SD trace logs**, serial logs, WinKey traces).  
+  - Relevant logs (e.g. **SD trace logs**, serial logs, WinKey traces) if available.
   - Screenshots if helpful.
 
 The clearer and more complete your report is, the more likely someone in the community will be able to reproduce and fix it.
@@ -207,13 +249,13 @@ If you need guaranteed support or commercial-level reliability, you should not r
 
 ## 📜 License & Credits
 
-This project is licensed under **Creative Commons Attribution–NonCommercial–ShareAlike 3.0 (CC BY-NC-SA 3.0)**.  
+This project is licensed under **Creative Commons Attribution-NonCommercial-ShareAlike 3.0 (CC BY-NC-SA 3.0)**.
 See [`LICENSE.md`](LICENSE.md) for full details.
 
 ### Credits
 
-- **Original work:** Len Koppl (KD0RC)  
-- **FlexRadio 6000 library:** Vincenzo Stefanazzi (IW7DMH)  
+- **Original work:** Len Koppl (KD0RC)
+- **FlexRadio 6000 library:** Vincenzo Stefanazzi (IW7DMH)
 - **Community maintenance and extensions:** TNX QSO and contributors
 
 ---
@@ -222,59 +264,59 @@ See [`LICENSE.md`](LICENSE.md) for full details.
 
 ### Original Project & Documentation
 
-- **Original TeensyMaestro firmware (KD0RC)**  
-  Official upstream repository by the original author, Len Koppl.  
+- **Original TeensyMaestro firmware (KD0RC)**
+  Official upstream repository by the original author, Len Koppl.
   https://github.com/KD0RC/Teensy-Maestro-for-Flex-6000-radios
 
-- **TeensyMaestro User Manual (DOCX)**  
-  Original user manual covering hardware operation, menus, and usage concepts.  
+- **TeensyMaestro User Manual (DOCX)**
+  Original user manual covering hardware operation, menus, and usage concepts.
   https://github.com/KD0RC/Teensy-Maestro-for-Flex-6000-radios/raw/refs/heads/master/TeensyMaestro%20User%20Manual.docx
 
 ---
 
 ### Hardware Design & Schematics (v2)
 
-- **TeensyMaestro Hardware Repository**  
-  Schematics, PCB files, and hardware design sources for TeensyMaestro.  
+- **TeensyMaestro Hardware Repository**
+  Schematics, PCB files, and hardware design sources for TeensyMaestro.
   https://github.com/rimuadmin/TeensyMaestro-Hardware
 
-- **TeensyMaestro Hardware Wiki**  
-  Hardware build notes, revisions, BOM details, and assembly guidance.  
+- **TeensyMaestro Hardware Wiki**
+  Hardware build notes, revisions, BOM details, and assembly guidance.
   https://github.com/rimuadmin/TeensyMaestro-Hardware/wiki
 
 ---
 
 ### Community & Discussion
 
-- **FlexRadio Community – TeensyMaestro Thread**  
-  Long-running discussion with user experiences, troubleshooting, and background.  
+- **FlexRadio Community - TeensyMaestro Thread**
+  Long-running discussion with user experiences, troubleshooting, and background.
   https://community.flexradio.com/discussion/8023866/teensymaestro/
 
 ---
 
 ### Kits & Commercial Hardware
 
-- **TeensyMaestro v2 Hardware Kit (G7UFO Radio Shop)**  
-  Commercially available TeensyMaestro hardware kit based on the v2 design.  
+- **TeensyMaestro v2 Hardware Kit (G7UFO Radio Shop)**
+  Commercially available TeensyMaestro hardware kit based on the v2 design.
   https://shop.g7ufo.radio/products/kit-teensy-maestro?variant=52210433687890
 
 ---
 
 ### Project-Specific References
 
-- **License – Creative Commons BY-NC-SA 3.0**  
+- **License - Creative Commons BY-NC-SA 3.0**
   https://creativecommons.org/licenses/by-nc-sa/3.0/
 
-- **WinKey Emulation Overview**  
+- **WinKey Emulation Overview**
   [WK_README.md](WK_README.md)
 
-- **WinKey Protocol Notes**  
+- **WinKey Protocol Notes**
   [WINKEYER_PROTOCOL_V2_EMULATION.md](WINKEYER_PROTOCOL_V2_EMULATION.md)
 
-- **Changelog**  
+- **Changelog**
   [CHANGELOG.md](CHANGELOG.md)
 
 ---
 
-© 2015–2025 Len Koppl (KD0RC), Vincenzo Stefanazzi (IW7DMH), and contributors.  
-Extended and maintained by **TNX QSO** — a non-profit community developing open-source utilities for ham radio enthusiasts.
+© 2015-2026 Len Koppl (KD0RC), Vincenzo Stefanazzi (IW7DMH), and contributors.
+Extended and maintained by **TNX QSO**, a community developing open-source utilities for ham radio enthusiasts.
