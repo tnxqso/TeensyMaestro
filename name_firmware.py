@@ -158,7 +158,7 @@ def pre_upload_force_custom_hex(*_args, **_kwargs):
 
     # Build the exact command we want to execute.
     # We do NOT rely on PlatformIO's default 'Uploading firmware.hex' message.
-    tycmd = r'"C:\Program Files (x86)\TyTools\tycmd.exe"'
+    tycmd = "tycmd"
     board = env.subst("$UPLOAD_PORT")  # often empty for TyTools; we keep your -B id below instead
     # Your log shows it uses -B 18009060; keep that stable.
     cmd = f'{tycmd} upload -B 18009060 --wait "{custom_hex}"'
