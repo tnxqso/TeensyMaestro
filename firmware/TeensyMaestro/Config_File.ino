@@ -1405,6 +1405,12 @@ if (InSetup && InBufUC.indexOf("CW FARNSWORTH:") >= 0) {
     return;
   }
 
+  // CW over SSB
+  if (InSetup && InBufUC.indexOf("CW OVER SSB:") >= 0) {
+    CWOverSSB = ParseBoolYN(line, CWOverSSB);
+    return;
+  }
+
   // Greeting Text: <up to 128 chars>  (empty string is valid and disables the greeting)
   if (InSetup && InBufUC.indexOf("GREETING TEXT:") >= 0) {
     int k = tm_index_of_key_ci(line, "Greeting Text:");

@@ -2,6 +2,19 @@
 #include "tm_system_utils.h"
 #include "TM_Keyer_Engine.h"
 
+#define TM_SERVICE_CW_OVER_SSB()                                        \
+  if (CWOverSSB) {                                                      \
+    bool _pinDot  = (digitalRead(DotPin) == LOW);                       \
+    bool _pinDash = (digitalRead(DashPin) == LOW);                      \
+    bool _pinSK   = (digitalRead(StraightKeyPin) == LOW);               \
+    g_keyerEngine.updatePaddles(                                        \
+      (Handed == 0) ? _pinDot : _pinDash,                               \
+      (Handed == 0) ? _pinDash : _pinDot);                              \
+    g_keyerEngine.setStraightKey(_pinSK);                               \
+    g_keyerEngine.poll();                                               \
+    KeyerLoop();                                                        \
+  }
+
 extern TM_Keyer_Engine g_keyerEngine;
 
 // Returns true if the radio can be controlled (online, not standalone, not headless).
@@ -204,7 +217,8 @@ void processIOExpanderBtn(int pressedBtn)
       // Wait until the PTT Button is released
       while (isButtonPressed(BTN_PTT))
       {
-        TM_PumpCoop();
+          TM_SERVICE_CW_OVER_SSB();
+          TM_PumpCoop();
       }
 
       if (pttStarted)
@@ -244,6 +258,7 @@ void processIOExpanderBtn(int pressedBtn)
 
       while (isButtonPressed(BTN_ACC_8))
       {
+        TM_SERVICE_CW_OVER_SSB();
         TM_PumpCoop();
       }
 
@@ -289,6 +304,7 @@ void processIOExpanderBtn(int pressedBtn)
 
       while (isButtonPressed(BTN_ACC_9))
       {
+        TM_SERVICE_CW_OVER_SSB();
         TM_PumpCoop();
       }
 
@@ -485,6 +501,7 @@ void ProcessButtons()
   while (digitalRead(MUXIOPin) == LOW)
   {
     // Keep Flex/events alive during the hold
+    TM_SERVICE_CW_OVER_SSB();
     TM_PumpCoop();
 
     // Long-press click tone (once)

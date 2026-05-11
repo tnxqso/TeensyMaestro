@@ -1021,6 +1021,7 @@ int SerNumSave        = 1;
 bool SerNumMenuActive = false;
 //bool SetSideTone = false;
 bool SideTone                   = true;
+bool CWOverSSB                  = false;  // allow keyer during SSB TX (sidetone + KeyOutPin only)
 int SideToneFreq                = 800;
 int SideToneFreqSave            = 800;
 volatile bool StraightKeyActive = false;
