@@ -27,6 +27,12 @@
 #define WK_TCP_TRACE 0
 #endif
 
+// Close a connected session that sends no bytes for this long.
+// Catches zombie clients killed without a clean TCP shutdown (e.g. kill -9).
+// Timer starts on the first received byte, not on accept, so a slow-to-open
+// client is never evicted before it has sent its WK open sequence.
+static constexpr uint32_t WK_TCP_IDLE_TIMEOUT_MS = 3600000;
+
 class TM_WK_TCP : public TM_IByteWriter {
 public:
   TM_WK_TCP(uint16_t port, TM_WK_Protocol& proto)
@@ -34,7 +40,7 @@ public:
 
   void begin() {
     _server.begin();
-    _lastRxMs = millis();
+    _lastRxMs = 0;
   }
 
   void poll() {
@@ -49,7 +55,7 @@ public:
       EthernetClient c = _server.available();
       if (c) {
         _client = c;
-        _lastRxMs = millis();
+        _lastRxMs = 0;  // timer starts on first received byte, not on accept
       }
     }
 
@@ -67,6 +73,18 @@ public:
         WK_DEBUGF("SRC:TCP -> onByte 0x%02X\n", (unsigned)b);
 #endif
         _proto.onByte(b);
+      }
+
+      // Idle timeout: evict zombie sessions that stop sending bytes.
+      // _lastRxMs == 0 means no byte has arrived yet this session; skip until
+      // the client has spoken at least once (WK open sequence), so a slow-to-
+      // open client is never evicted during its own setup.
+      if (_lastRxMs != 0 &&
+          (uint32_t)(millis() - _lastRxMs) >= WK_TCP_IDLE_TIMEOUT_MS) {
+        WK_DEBUGF("WK TCP: idle timeout, closing session\n");
+        _client.stop();
+        _lastRxMs = 0;
+        _proto.onTransportClosed();
       }
     }
   }
