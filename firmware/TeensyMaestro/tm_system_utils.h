@@ -142,6 +142,11 @@ bool TMU_SyncCwWpm(bool preserveBaseline,
                    int* outAppliedWpm = nullptr,
                    const char* tag = nullptr);
 
+// Mark that a local (encoder/UI) WPM change was just applied.
+// Suppresses TMU_SyncCwWpm() for 600ms to prevent the radio's
+// stale echo from overriding the change before it echoes back.
+void TMU_MarkLocalWpmSet();
+
 // Unified cooperative service pump for TeensyMaestro subsystems.
 // Used to keep network I/O, event dispatching, and background tasks flowing
 // during wait loops or timing-sensitive operations.

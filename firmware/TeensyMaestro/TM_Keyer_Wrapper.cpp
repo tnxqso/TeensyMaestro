@@ -294,6 +294,7 @@ void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline)
     g_lastHostWpm = -1;
 
     CWValSave = CWVal;
+    TMU_MarkLocalWpmSet();
     if (TM_WK_Protocol::active()) {
         TM_WK_Protocol::active()->setLocalBaseline((uint8_t)CWVal);
     }

@@ -56,6 +56,13 @@ void TMU_MarkAdoptedRadioWpm() {
   s_wpmAdoptedFromRadio = true;
 }
 
+static constexpr uint32_t LOCAL_WPM_HOLDOFF_MS = 600;
+static uint32_t s_localWpmSetMs = 0;
+
+void TMU_MarkLocalWpmSet() {
+  s_localWpmSetMs = millis();
+}
+
 // -----------------------------------------------------------------------------
 // Boot info snapshot (unchanged)
 // -----------------------------------------------------------------------------
@@ -269,6 +276,14 @@ bool TMU_SyncCwWpm(bool preserveBaseline,
 
   if (!fRig.connected) {
     DLOG_WPM("[WPM] sync skip: rig not connected\n");
+    return false;
+  }
+
+  if (s_localWpmSetMs != 0 &&
+      (int32_t)(millis() - s_localWpmSetMs) < (int32_t)LOCAL_WPM_HOLDOFF_MS) {
+    DLOG_WPM("[WPM] sync skip: local holdoff active (%lums remaining)\n",
+             (unsigned long)(LOCAL_WPM_HOLDOFF_MS -
+                             (uint32_t)(millis() - s_localWpmSetMs)));
     return false;
   }
 
