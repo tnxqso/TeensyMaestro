@@ -1403,8 +1403,6 @@ void loop()
     if (GotSpeedParm) {
       GotSpeedParm = false;
       TMU_SyncCwWpm(/*preserveBaseline=*/false, &applied, "loop:parm");
-    } else {
-      TMU_SyncCwWpm(/*preserveBaseline=*/false, &applied, "loop");
     }
 
     if (fRig.Current_Profile != Profile)

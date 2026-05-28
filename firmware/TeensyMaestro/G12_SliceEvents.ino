@@ -408,6 +408,9 @@ void onSlice_tx(const int senderId)
     // Slice becomes TX owner – real user activity
     ResetScreenSaver("Slice event: TX slice selected");
     TXSlice = senderId;
+    if (fRig.slice[senderId].mode == "CW") {
+      GotSpeedParm = true;
+    }
   }
   else
   {
@@ -804,6 +807,9 @@ void onSlice_mode(const int senderId)
     VFOStep[senderId] = VFOStepCW[senderId];
     DispStep(senderId);
     VFOTuningRate[senderId] = TuningRateCW[senderId];
+    if (senderId == TXSlice) {
+      GotSpeedParm = true;
+    }
   }
 
   VFOTuningRateSave[senderId] = VFOTuningRate[senderId];

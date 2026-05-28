@@ -57,7 +57,7 @@
 #endif
 
 #ifndef TM_VERSION
-  #define TM_VERSION        "0.9.44"     // Semantic version with prerelease stage
+  #define TM_VERSION        "0.9.45"     // Semantic version with prerelease stage
 #endif
 
 #ifndef TM_FULL_NAME
