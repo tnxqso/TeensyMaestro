@@ -23,6 +23,16 @@
 
 int STUN_ExternalVitaPort = 0;
 
+bool isPrivateIp(const IPAddress &a) {
+  if (a[0] == 10) return true;                               // 10.0.0.0/8
+  if (a[0] == 172 && a[1] >= 16 && a[1] <= 31) return true;  // 172.16.0.0/12
+  if (a[0] == 192 && a[1] == 168) return true;               // 192.168.0.0/16
+  if (a[0] == 100 && a[1] >= 64 && a[1] <= 127) return true; // 100.64.0.0/10 CGNAT
+  if (a[0] == 169 && a[1] == 254) return true;               // 169.254.0.0/16 link-local
+  if (a[0] == 127) return true;                              // 127.0.0.0/8 loopback
+  return false;
+}
+
 // ---------- Build-time toggles ----------
 // Set to 1 to print detailed STUN parsing logs (attributes, etc.)
 #ifndef STUN_DEBUG

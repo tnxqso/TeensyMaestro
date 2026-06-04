@@ -32,3 +32,9 @@ extern int STUN_ExternalVitaPort;
 
 // Run STUN and remember external port; call after Ethernet is up.
 bool DoStunAndAdoptVitaPort(uint16_t localPort /* usually UDP_VITA49_PORT */);
+
+// Returns true for RFC1918 / CGNAT / link-local / loopback ranges.
+// STUN is only meaningful when the target is reached over the public Internet
+// through our own NAT. A private target means a routed/VPN/LAN path with no NAT,
+// so STUN must be skipped to avoid announcing a meaningless WAN-mapped port.
+bool isPrivateIp(const IPAddress &a);

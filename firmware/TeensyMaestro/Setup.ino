@@ -208,24 +208,18 @@ FLASHMEM void TeensyMaestroSetup()
   // --- Network Setup ---
   getIpAddress();  // Will get DHCP address or fixed ip if no DHCP address is served
 
-  // Run STUN only for Fixed / Fixed+Failover, and only if target is off-LAN
-  auto sameSubnet = [](const IPAddress &a, const IPAddress &b, const IPAddress &mask) {
-    for (int i = 0; i < 4; ++i) if ( (a[i] & mask[i]) != (b[i] & mask[i]) ) return false;
-    return true;
-  };
-
   if (CFG_ConnMode == TM_CONN_FIXED || CFG_ConnMode == TM_CONN_FIXED_FAILOVER) {
     // Resolve CFG_FlexHost -> CFG_FlexIp[] (literal or DNS)
     if (TM_ComputeFlexTargetIP()) {
-      IPAddress myIP   = Ethernet.localIP();
-      IPAddress myMask = Ethernet.subnetMask();
       IPAddress tgt(CFG_FlexIp[0], CFG_FlexIp[1], CFG_FlexIp[2], CFG_FlexIp[3]);
 
-      // Only punch NAT if target is not on our local L2 / subnet
-      if (!sameSubnet(myIP, tgt, myMask)) {
+      // Run STUN only for a public (non-RFC1918) target reached through our own NAT.
+      // Private targets (routed VPN or LAN) have no NAT in the path, so STUN would
+      // announce a meaningless WAN-mapped port and break the VITA-49 return path.
+      if (!isPrivateIp(tgt)) {
         DoStunAndAdoptVitaPort(UDP_VITA49_PORT);
       } else {
-        debugln("Target is on local subnet -> STUN skipped.");
+        debugln("Target is private (no NAT) -> STUN skipped.");
       }
     } else {
       debugln("No valid Fixed target IP -> STUN skipped.");
