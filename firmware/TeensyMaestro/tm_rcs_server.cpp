@@ -33,9 +33,16 @@ bool TM_RCS_RequestTune(bool on);
 // Implemented in Process_Buttons.ino.
 bool TM_RCS_RequestDax(bool on);
 
+// Global profile and frequency control for the QSY verb.
+// Implemented in Process_Buttons.ino.
+bool TM_RCS_RequestProfileLoad(const char* name);
+bool TM_RCS_ProfileApplied();
+bool TM_RCS_RequestFreq(long freqHz);
+int  TM_RCS_ProfileForBandMode(int meters, const char* mode, String& out);
+
 // ===== Debug switches for Remote Command Server =====
 #ifndef RCS_DEBUG_ENABLE
-#define RCS_DEBUG_ENABLE 0
+#define RCS_DEBUG_ENABLE 1
 #endif
 
 #if RCS_DEBUG_ENABLE
@@ -120,6 +127,190 @@ namespace {
       if (c >= 'a' && c <= 'z') {
         buf[i] = char(c - 'a' + 'A');
       }
+    }
+  }
+
+// ===== Deferred QSY sequence =====
+  //
+  // A QSY cannot complete synchronously: loading a global profile takes time
+  // on the radio side and the main loop must not block, since CW keying is
+  // driven from the same cooperative loop. The verb handler validates, arms
+  // this state machine and replies OK immediately. The reply therefore
+  // confirms acceptance, not completion.
+
+  enum QsyState {
+    QSY_IDLE = 0,
+    QSY_WAIT_PROFILE,   // waiting for the radio to report the profile as current
+    QSY_SETTLE          // profile applied, letting the status burst subside
+  };
+
+  // Maximum time to wait for the radio to confirm the profile load.
+  // On timeout the frequency is set anyway rather than dropping the QSY.
+  static constexpr uint32_t QSY_PROFILE_TIMEOUT_MS = 4000;
+
+  // Quiet period between profile confirmation and setting the frequency.
+  // A profile load rewrites slice state, so the frequency must be applied
+  // after the resulting status updates have arrived.
+  static constexpr uint32_t QSY_SETTLE_MS = 750;
+
+  QsyState  g_qsyState  = QSY_IDLE;
+  uint32_t  g_qsyTimer  = 0;   // rollover safe deadline, compare with (int32_t)
+  long      g_qsyFreqHz = 0;
+
+  // Band edges used only to select a profile, not to police transmit
+  // privileges. CheckInBand() handles legality separately.
+  struct BandRange {
+    long lowHz;
+    long highHz;
+    int  meters;
+  };
+
+  static const BandRange QSY_BANDS[] = {
+    {  1800000L,  2000000L, 160 },
+    {  3500000L,  3800000L,  80 },
+    {  5351500L,  5366500L,  60 },
+    {  7000000L,  7200000L,  40 },
+    { 10100000L, 10150000L,  30 },
+    { 14000000L, 14350000L,  20 },
+    { 18068000L, 18168000L,  17 },
+    { 21000000L, 21450000L,  15 },
+    { 24890000L, 24990000L,  12 },
+    { 28000000L, 29700000L,  10 },
+    { 50000000L, 54000000L,   6 }
+  };
+
+  // Returns the band in meters, or -1 when the frequency is outside every
+  // band that has profile mappings.
+  int bandForFreq(long hz) {
+    const size_t n = sizeof(QSY_BANDS) / sizeof(QSY_BANDS[0]);
+    for (size_t i = 0; i < n; ++i) {
+      if (hz >= QSY_BANDS[i].lowHz && hz <= QSY_BANDS[i].highHz) {
+        return QSY_BANDS[i].meters;
+      }
+    }
+    return -1;
+  }
+
+  // Translate a spot or radio mode string onto one of the four profile
+  // buckets used by the touchscreen selector. The input is already
+  // uppercased by handleCommandLine(). Returns nullptr for unknown modes,
+  // so the caller can report an error instead of silently defaulting.
+  const char* modeBucket(const char* mode) {
+    if (strcmp(mode, "CW")   == 0) return "CW";
+    if (strcmp(mode, "CWU")  == 0) return "CW";
+    if (strcmp(mode, "CWL")  == 0) return "CW";
+
+    if (strcmp(mode, "SSB")  == 0) return "SSB";
+    if (strcmp(mode, "USB")  == 0) return "SSB";
+    if (strcmp(mode, "LSB")  == 0) return "SSB";
+
+    if (strcmp(mode, "FM")   == 0) return "FM";
+    if (strcmp(mode, "NFM")  == 0) return "FM";
+
+    if (strcmp(mode, "DIGU") == 0) return "DIGU";
+    if (strcmp(mode, "DIGL") == 0) return "DIGU";
+    if (strcmp(mode, "DATA") == 0) return "DIGU";
+    if (strcmp(mode, "FT8")  == 0) return "DIGU";
+    if (strcmp(mode, "FT4")  == 0) return "DIGU";
+    if (strcmp(mode, "RTTY") == 0) return "DIGU";
+    if (strcmp(mode, "PSK")  == 0) return "DIGU";
+
+    return nullptr;
+  }
+
+  // Handle the argument part of: QSY <freq_hz> <mode>
+  // arg is already trimmed and uppercased.
+  //
+  // Any error reply means nothing was sent to the radio, so the caller is
+  // free to fall back to a plain frequency and mode change over CAT.
+  String handleQsy(const char* arg) {
+    char* endp = nullptr;
+    long freqHz = strtol(arg, &endp, 10);
+    if (endp == arg) {
+      return String("ERR invalid_freq");
+    }
+
+    const char* p = endp;
+    while (*p == ' ' || *p == '\t') {
+      ++p;
+    }
+    if (*p == '\0') {
+      return String("ERR missing_mode");
+    }
+
+    const int meters = bandForFreq(freqHz);
+    if (meters < 0) {
+      return String("ERR unknown_band");
+    }
+
+    const char* bucket = modeBucket(p);
+    if (bucket == nullptr) {
+      return String("ERR unknown_mode");
+    }
+
+    String profName;
+    const int rc = TM_RCS_ProfileForBandMode(meters, bucket, profName);
+    if (rc == -1) {
+      return String("ERR no_mapping");
+    }
+    if (rc != 0) {
+      return String("ERR no_profile");
+    }
+
+    // A QSY arriving while another is pending supersedes it, since the
+    // newer request reflects the current operator intent.
+    if (!TM_RCS_RequestProfileLoad(profName.c_str())) {
+      return String("ERR rig_not_controllable");
+    }
+
+    g_qsyFreqHz = freqHz;
+    g_qsyTimer  = millis() + QSY_PROFILE_TIMEOUT_MS;
+    g_qsyState  = QSY_WAIT_PROFILE;
+
+    RCS_DEBUGF("RCS: QSY armed freq=%ld band=%dm profile='%s'\n",
+               freqHz, meters, profName.c_str());
+
+    return String("OK");
+  }
+
+  // Advance the deferred QSY sequence. Called once per main loop iteration.
+  // Must never block.
+  void tickQsy() {
+    if (g_qsyState == QSY_IDLE) {
+      return;
+    }
+
+    const uint32_t now = millis();
+
+    switch (g_qsyState) {
+      case QSY_WAIT_PROFILE:
+        if (TM_RCS_ProfileApplied()) {
+          g_qsyTimer = now + QSY_SETTLE_MS;
+          g_qsyState = QSY_SETTLE;
+          RCS_DEBUGLN(F("RCS: QSY profile applied, settling"));
+        } else if ((int32_t)(now - g_qsyTimer) > 0) {
+          // No confirmation from the radio. Set the frequency anyway
+          // rather than silently dropping the QSY.
+          RCS_DEBUGLN(F("RCS: QSY profile timeout, setting freq anyway"));
+          g_qsyState = QSY_IDLE;
+          TM_RCS_RequestFreq(g_qsyFreqHz);
+        }
+        break;
+
+      case QSY_SETTLE:
+        if ((int32_t)(now - g_qsyTimer) > 0) {
+          g_qsyState = QSY_IDLE;
+          if (!TM_RCS_RequestFreq(g_qsyFreqHz)) {
+            RCS_DEBUGLN(F("RCS: QSY freq failed, no usable TX slice"));
+          } else {
+            RCS_DEBUGF("RCS: QSY freq set to %ld\n", g_qsyFreqHz);
+          }
+        }
+        break;
+
+      default:
+        g_qsyState = QSY_IDLE;
+        break;
     }
   }
 
@@ -233,6 +424,15 @@ namespace {
       return String("OK");
     }
 
+    // QSY commands
+    // Usage: "QSY <freq_hz> <mode>"
+    if (strcmp(verb, "QSY") == 0) {
+      if (!arg || arg[0] == '\0') {
+        return String("ERR missing_arg");
+      }
+      return handleQsy(arg);
+    }
+
     // Simple health check
     if (strcmp(verb, "PING") == 0) {
       return String("OK PING");
@@ -342,5 +542,6 @@ void TM_RCS::poll() {
     }
     return;
   }
+  tickQsy();
   pollClient();
 }

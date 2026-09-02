@@ -764,6 +764,116 @@ bool TM_RCS_RequestDax(bool on)
   return DoRigDax(on);
 }
 
+// ---- Remote Command Server backend: global profile and frequency ----
+
+// Ask the radio to load a global profile by name.
+// The name is passed through verbatim; loadGlobalProfile() handles quoting.
+// Returns false if the radio connection is not usable.
+bool TM_RCS_RequestProfileLoad(const char* name)
+{
+  if (fRig.interlock.isInTransmit) {
+    return false;
+  }
+  if (name == nullptr || name[0] == '\0') {
+    return false;
+  }
+  if (!fRig.connected) {
+    return false;
+  }
+
+  fRig.loadGlobalProfile(String(name));
+  return true;
+}
+
+// True once the radio has reported the newly loaded profile as current.
+// loadGlobalProfile() clears this flag before sending the load command,
+// so it is safe to poll after arming a load.
+bool TM_RCS_ProfileApplied()
+{
+  return fRig.Global_Prof_Applied;
+}
+
+// Set the frequency of the current TX slice.
+// freqHz is in Hz. Returns false if no TX slice could be found.
+// The TX slice is derived by scanning rather than trusting the global
+// TXSlice variable, which is event driven and may be stale right after
+// a profile load.
+bool TM_RCS_RequestFreq(long freqHz)
+{
+  if (!fRig.connected) {
+    return false;
+  }
+
+  int txSlice = -1;
+  for (int i = 0; i < fRig.nMaxSlice; ++i) {
+    if (fRig.slice[i].tx == 1 && fRig.slice[i].in_use == 1) {
+      txSlice = i;
+      break;
+    }
+  }
+
+  if (txSlice < 0) {
+    return false;
+  }
+
+  fRig.setFreq(txSlice, (int)freqHz);
+
+  // FlexRig::setFreq() assigns slice[].RF_frequency directly instead of going
+  // through Slice::set_RF_frequency(), so upd_RF_frequency is never set. The
+  // radio's echo of the change then compares equal to the already updated
+  // cache and is silently absorbed, so onSlice_RF_frequency() never runs and
+  // the display keeps showing the previous value. Refresh the display and the
+  // CurFreq cache explicitly, the same way the A to B menu handlers do.
+  DispFrq(txSlice);
+  CurFreq[txSlice] = fRig.slice[txSlice].RF_frequency;
+
+  return true;
+}
+
+// Resolve a band and mode bucket to a global profile name, and verify that
+// the radio actually knows that profile.
+//
+// meters must be one of the values accepted by ProfileSel, mode one of
+// "CW", "SSB", "FM", "DIGU".
+//
+// Returns:
+//    0  success, the profile name is written to out
+//   -1  no mapping exists for this band and mode combination
+//   -2  a name is mapped but the radio does not report such a profile
+//
+// The radio's profile list is cached at connect time from the
+// "profile global list=" status line. When that cache is still empty the
+// existence check is skipped rather than failing, so that a QSY issued
+// shortly after boot is not rejected for the wrong reason.
+int TM_RCS_ProfileForBandMode(int meters, const char* mode, String& out)
+{
+  out = ProfileSel::profileNameForBandMode(meters, mode);
+
+  if (out.length() == 0) {
+    return -1;
+  }
+
+  // Empty cache: cannot validate, so accept the mapped name as is.
+  if (fRig.Profile[0].length() == 0) {
+    return 0;
+  }
+
+  // Derive the bound from the array itself rather than duplicating the
+  // PROFILE_MAX constant, which is function local inside the vendor library.
+  const int maxProfiles = (int)(sizeof(fRig.Profile) / sizeof(fRig.Profile[0]));
+
+  for (int i = 0; i < maxProfiles; ++i) {
+    if (fRig.Profile[i].length() == 0) {
+      break;  // end of list
+    }
+    if (fRig.Profile[i] == out) {
+      return 0;
+    }
+  }
+
+  return -2;
+}
+
 void HandleBtnTuneBefore()
 {
   // Request TX TUNE; UI is driven by interlock events

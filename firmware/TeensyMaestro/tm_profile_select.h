@@ -32,4 +32,12 @@ void onTouch(int16_t x, int16_t y, bool isRelease); // Route touches while visib
 
 void renderIfDirty();                // Optional explicit redraw
 
+// Look up the configured global profile name for a band and mode bucket.
+// meters must be one of 160, 80, 60, 40, 30, 20, 17, 15, 12, 10, 6.
+// mode must be one of "CW", "SSB", "FM", "DIGU", compared case insensitively.
+// Returns an empty String when the band or the mode is not recognised.
+// Unlike the touchscreen path this performs no silent fallback, so callers
+// can distinguish a real mapping from a bad request.
+String profileNameForBandMode(int meters, const char* mode);
+
 } // namespace ProfileSel

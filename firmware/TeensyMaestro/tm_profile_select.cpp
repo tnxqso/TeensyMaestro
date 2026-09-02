@@ -352,6 +352,43 @@ static void openModesPage() {
 // ------------------------------- Public API -----------------------------------
 namespace ProfileSel {
 
+FLASHMEM String profileNameForBandMode(int meters, const char* mode) {
+  if (mode == nullptr || mode[0] == '\0') {
+    return String("");
+  }
+
+  // Strict band lookup. idxForMeters() falls back to 20m for unknown input,
+  // which is fine for the touchscreen but wrong for a programmatic caller.
+  int idx = -1;
+  for (int i = 0; i < (int)(sizeof(M_KEYS) / sizeof(M_KEYS[0])); ++i) {
+    if (M_KEYS[i] == meters) {
+      idx = i;
+      break;
+    }
+  }
+  if (idx < 0) {
+    return String("");
+  }
+
+  // Strict mode lookup. mapForMode() falls back to CW_MAP for unknown input,
+  // which would silently select a CW profile for a non CW request.
+  String* const* arr = nullptr;
+  if (eqMode(mode, "CW")) {
+    arr = CW_MAP;
+  } else if (eqMode(mode, "SSB")) {
+    arr = SSB_MAP;
+  } else if (eqMode(mode, "FM")) {
+    arr = FM_MAP;
+  } else if (eqMode(mode, "DIGU")) {
+    arr = DIGU_MAP;
+  }
+  if (arr == nullptr) {
+    return String("");
+  }
+
+  return *(arr[idx]);
+}
+
 FLASHMEM void open() {
   if (!canOpen()) return;
   MenuActive = true;
