@@ -472,7 +472,10 @@ QsySelAction CFG_QsySel_Action = QSYSEL_ACTION_PROFILE;  // legacy default
 uint16_t CFG_Profile_Selector_Timeout_Ms     = 5000; // total idle timeout
 uint16_t CFG_Profile_Selector_Close_Delay_Ms = 200;  // close-after-mode tap
 
-// Mode visibility (default baseline; INI can override)
+// Parsed from MMConfig.ini for backward compatibility with
+// existing config files. Not read by any code today. The key
+// was removed from the shipped MMConfig.ini so it is no longer
+// advertised as a working feature.
 bool CFG_Mode_Visible_SSB  = true;
 bool CFG_Mode_Visible_CW   = true;
 bool CFG_Mode_Visible_FM   = true;

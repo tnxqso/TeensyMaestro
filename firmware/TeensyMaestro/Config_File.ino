@@ -1650,7 +1650,8 @@ if (InSetup && InBufUC.indexOf("CW FARNSWORTH:") >= 0) {
     return;
   }
 
-  // --- QSY Selector: mode visibility ---------------------------------------
+  // --- QSY Selector: mode visibility (parsed for backward
+  //     compatibility, not currently used by any code) ---
   if (InSetup && InBufUC.indexOf("MODE VISIBLE SSB:") >= 0) {
     CFG_Mode_Visible_SSB = ParseBoolYN(line, CFG_Mode_Visible_SSB);
     return;

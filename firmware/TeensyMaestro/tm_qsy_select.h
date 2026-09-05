@@ -43,9 +43,16 @@ void open();                         // Open if connected, not headless, not TX
 void close();                        // Force close
 void tick();                         // Call periodically (e.g., from loop())
 bool isVisible();                    // Selector visible?
+// Request a redraw on the next tick(). Safe to call from event callbacks:
+// it never touches the display itself.
+void markDirty();
+// Update the BANDMODE mode highlight in place. Called from
+// onSlice_mode() when the radio reports a new mode. Redraws only
+// the two affected highlight rectangles, never the whole page,
+// because a full redraw from an event callback corrupts the
+// display.
+void onRadioModeChanged();
 void onTouch(int16_t x, int16_t y, bool isRelease); // Route touches while visible
-
-void renderIfDirty();                // Optional explicit redraw
 
 // Look up the configured global profile name for a band and mode bucket.
 // meters must be one of 160, 80, 60, 40, 30, 20, 17, 15, 12, 10, 6.

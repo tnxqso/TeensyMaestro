@@ -102,7 +102,13 @@ void onSlice_in_use(const int senderId)
       CurFreq[senderId] = 0.0;
       if (!InSetup)
       {
-        RefreshScreen();
+        // RefreshScreen() sets MenuActive = false as a side effect. If that
+        // runs while the QSY Selector is open, every Disp* guard stops working
+        // and the main screen draws over the selector. Skip the refresh; the
+        // selector redraws the screen itself when it closes.
+        if (!QsySel::isVisible()) {
+          RefreshScreen();
+        }
       }
     }
     else
@@ -115,7 +121,12 @@ void onSlice_in_use(const int senderId)
       const int y = 0;
       const int w = isA ? 240 : 239;
       const int h = 239;
-      tft.fillRect(x, y, w, h, COLOR_BLACK);
+      // The QSY Selector owns the whole screen while it is open. Clearing
+      // half the display here would black out its tile grid. The selector
+      // redraws the screen itself when it closes.
+      if (!QsySel::isVisible()) {
+        tft.fillRect(x, y, w, h, COLOR_BLACK);
+      }
 
       DispSlice();
     }
@@ -124,7 +135,12 @@ void onSlice_in_use(const int senderId)
   if (fRig.slice[senderId].active == 1)
   {
     LoadFilterMenu(fRig.slice[senderId].mode);
-    if (MenuActive && MenuIDX == FilterMenuIDX)
+    // LoadFilterMenu() sets MenuIDX = FilterMenuIDX as a side effect,
+    // so the MenuIDX test below cannot tell whether a filter menu is
+    // actually on screen. MenuActive is also true while the QSY
+    // Selector is open, and DispMenu() has no guard of its own: it
+    // does a full fillScreen(). Exclude the selector explicitly.
+    if (MenuActive && !QsySel::isVisible() && MenuIDX == FilterMenuIDX)
     {
       DispMenu(FilterMenuIDX);
     }
@@ -461,7 +477,12 @@ void onSlice_active(const int senderId)
   {
     SliceActiveVal = senderId;
     LoadFilterMenu(fRig.slice[senderId].mode);
-    if (MenuActive && MenuIDX == FilterMenuIDX)
+    // LoadFilterMenu() sets MenuIDX = FilterMenuIDX as a side effect,
+    // so the MenuIDX test below cannot tell whether a filter menu is
+    // actually on screen. MenuActive is also true while the QSY
+    // Selector is open, and DispMenu() has no guard of its own: it
+    // does a full fillScreen(). Exclude the selector explicitly.
+    if (MenuActive && !QsySel::isVisible() && MenuIDX == FilterMenuIDX)
     {
       DispMenu(FilterMenuIDX);
     }
@@ -844,11 +865,20 @@ void onSlice_mode(const int senderId)
   if (fRig.slice[senderId].active == 1)
   {
     LoadFilterMenu(fRig.slice[senderId].mode);
-    if (MenuActive && MenuIDX == FilterMenuIDX)
+    // LoadFilterMenu() sets MenuIDX = FilterMenuIDX as a side effect,
+    // so the MenuIDX test below cannot tell whether a filter menu is
+    // actually on screen. MenuActive is also true while the QSY
+    // Selector is open, and DispMenu() has no guard of its own: it
+    // does a full fillScreen(). Exclude the selector explicitly.
+    if (MenuActive && !QsySel::isVisible() && MenuIDX == FilterMenuIDX)
     {
       DispMenu(FilterMenuIDX);
     }
   }
+
+  // Keep the QSY Selector's mode highlight in sync. This updates
+  // two small rectangles only, never a full redraw.
+  QsySel::onRadioModeChanged();
 }
 
 void onSlice_step_list(const int senderId)

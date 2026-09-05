@@ -104,6 +104,13 @@ If you are not, you are much better off **sticking to the prebuilt firmware from
   - Periodically synchronizes the internal clock against NTP servers.
   - Ensures accurate UTC display for logging and contest operation.
 
+- **QSY Selector**
+  - A full-screen band and mode selector, opened with a short press in the centre of the display.
+  - Two actions, selected with `Selector Action` in `MMConfig.ini`:
+    - `PROFILE` loads a SmartSDR Global Profile, composed from the chosen band and mode using the `Profile Map` table.
+    - `BANDMODE` applies the band directly to the panadapter owning the active slice, then optionally applies a mode to that slice. Use this if you set up bands and modes in your SDR client rather than through global profiles.
+  - See the Touch Zones section for the full behaviour of both actions.
+
 - **Enhanced User Interface**
   - Clock widget and cleaner slice displays.
   - Tweaked layouts and visual consistency for Hardware v2.
@@ -120,7 +127,7 @@ TeensyMaestro CE adds a number of things on top of the original firmware by Len 
 - **Rewritten keyer engine.** CE's CW keyer is a ground-up rewrite with responsiveness and paddle feel as the primary design goals. Non-blocking timing, break-in handling, and paddle response are tuned for smooth interactive use.
 - **WinKeyer v2 emulation (TM WK).** CE includes a built-in WinKeyer v2 emulator so contest and logging software can key your radio through TeensyMaestro over USB serial or TCP. See the Key Features section and `WK_README.md` for details.
 - **Extended MMConfig.ini.** CE recognises additional configuration keys. The CE and original configuration files are not interchangeable; always use the CE version from this repository (see the installation section).
-- **Touch screen layout.** CE defines a specific set of touch zones including a Profile Selector modal (bands and modes), a soft/hard Reset region in the lower right, and a splash overlay in the lower left corner. See the Touch Zones section below.
+- **Touch screen layout.** CE defines a specific set of touch zones including a QSY Selector modal (bands and modes), a soft/hard Reset region in the lower right, and a splash overlay in the lower left corner. See the Touch Zones section below.
 - **STUN/NAT traversal and fixed-IP operation.** CE includes infrastructure for remote operation through NAT or a firewall.
 - **NTP clock sync and clock widget.** CE periodically syncs its internal clock via NTP and shows it on the main screen.
 
@@ -140,7 +147,7 @@ TeensyMaestro CE uses a specific touch-zone layout on the ST7796 480×320 displa
 | `Top1` | (96, 0) - (246, 64) | Toggle TX on Slice A | (logged only) |
 | `Top2` | (246, 0) - (370, 64) | Split: create Slice B from A | (logged only) |
 | `Top3` | (370, 0) - (480, 64) | Toggle TX on Slice B | (logged only) |
-| `CenterArea` | (0, 84) - (480, 236) | Open Profile Selector modal | Toggle CW / SSB |
+| `CenterArea` | (0, 84) - (480, 236) | Open QSY Selector modal | Toggle CW / SSB |
 | `BottomLeft_Splash` | (0, 256) - (96, 320) | Hold to show splash overlay; releases on lift | (no long-press threshold) |
 | `Bottom1` | (96, 256) - (246, 320) | Reserved | Reserved |
 | `Bottom2` | (246, 256) - (370, 320) | Reserved | Reserved |
@@ -151,37 +158,67 @@ Two narrow horizontal strips at `y=64..84` and `y=236..256` are dead zones that 
 
 The `ResetButton` sits inside the right portion of `Bottom3`. Reset is hit-tested first and takes priority, so `Bottom3` never fires in that corner. This is intentional.
 
-### Profile Selector modal - Bands page
+### QSY Selector modal - Bands page
 
 Opened by a short press in `CenterArea`. Full-screen grid of 3 × 4 cells, 152×72 px with 6 px gaps.
 
 | Zone | Pixel bounds | Action |
 |---|---|---|
 | `Band_160m` | (6, 6) - (158, 78) | Select 160 m, advance to Modes page |
-| `Band_80m` | (158, 6) - (310, 78) | Select 80 m |
-| `Band_60m` | (310, 6) - (462, 78) | Select 60 m |
-| `Band_40m` | (6, 78) - (158, 150) | Select 40 m |
-| `Band_30m` | (158, 78) - (310, 150) | Select 30 m |
-| `Band_20m` | (310, 78) - (462, 150) | Select 20 m |
-| `Band_17m` | (6, 150) - (158, 222) | Select 17 m |
-| `Band_15m` | (158, 150) - (310, 222) | Select 15 m |
-| `Band_12m` | (310, 150) - (462, 222) | Select 12 m |
-| `Band_10m` | (6, 222) - (158, 294) | Select 10 m |
-| `Band_6m` | (158, 222) - (310, 294) | Select 6 m |
-| `Bands_Cancel` | (310, 222) - (462, 294) | Close selector, return to main screen |
+| `Band_80m` | (164, 6) - (316, 78) | Select 80 m |
+| `Band_60m` | (322, 6) - (474, 78) | Select 60 m |
+| `Band_40m` | (6, 84) - (158, 156) | Select 40 m |
+| `Band_30m` | (164, 84) - (316, 156) | Select 30 m |
+| `Band_20m` | (322, 84) - (474, 156) | Select 20 m |
+| `Band_17m` | (6, 162) - (158, 234) | Select 17 m |
+| `Band_15m` | (164, 162) - (316, 234) | Select 15 m |
+| `Band_12m` | (322, 162) - (474, 234) | Select 12 m |
+| `Band_10m` | (6, 240) - (158, 312) | Select 10 m |
+| `Band_6m` | (164, 240) - (316, 312) | Select 6 m |
+| `Bands_Cancel` | (322, 240) - (474, 312) | Close selector, return to main screen |
 
-### Profile Selector modal - Modes page
+In the `BANDMODE` action the band is applied to the radio immediately when you pick it, before the Modes page opens. In the `PROFILE` action nothing is sent until a mode has also been chosen.
+
+### QSY Selector modal - Modes page
 
 Appears after a band is chosen. 2 × 3 cells, 228×96 px with 8 px gaps. A 200 ms arm-guard prevents an accidental "through-press" from the Bands page.
+
+The tiles depend on `Selector Action`.
+
+#### Modes page with `Selector Action: PROFILE`
+
+The tile labels are components of a Global Profile name, not radio modes. The chosen band and mode are looked up in the `Profile Map` table in `MMConfig.ini` and the resulting profile is loaded. The profile decides frequency, mode, filters and antenna.
 
 | Zone | Pixel bounds | Enabled for | Action |
 |---|---|---|---|
 | `Mode_SSB` | (8, 8) - (236, 104) | All bands except 30 m | Load profile, close selector |
 | `Mode_CW` | (244, 8) - (472, 104) | All bands | Load profile, close selector |
-| `Mode_FM` | (8, 104) - (236, 200) | 10 m and 6 m only | Load profile, close selector |
-| `Mode_DIGU` | (244, 104) - (472, 200) | All bands | Load profile, close selector |
-| `Mode_Empty` | (8, 200) - (236, 296) | Never (disabled slot) | Ignored |
-| `Modes_Cancel` | (244, 200) - (472, 296) | Always | Close selector, return to main screen |
+| `Mode_FM` | (8, 112) - (236, 208) | 10 m and 6 m only | Load profile, close selector |
+| `Mode_DIGU` | (244, 112) - (472, 208) | All bands | Load profile, close selector |
+| `Mode_Empty` | (8, 216) - (236, 312) | Never (disabled slot) | Ignored |
+| `Modes_Cancel` | (244, 216) - (472, 312) | Always | Close selector, return to main screen |
+
+#### Modes page with `Selector Action: BANDMODE`
+
+The tile labels are real slice modes, sent to the radio as-is. There is no combined SSB tile: USB and LSB are separate, so no automatic sideband choice is made on your behalf.
+
+| Zone | Pixel bounds | Enabled for | Action |
+|---|---|---|---|
+| `Mode_CW` | (8, 8) - (236, 104) | All bands | Set mode on active slice, close selector |
+| `Mode_USB` | (244, 8) - (472, 104) | All bands except 30 m | Set mode on active slice, close selector |
+| `Mode_LSB` | (8, 112) - (236, 208) | All bands except 30 m and 60 m | Set mode on active slice, close selector |
+| `Mode_FM` | (244, 112) - (472, 208) | 10 m and 6 m only | Set mode on active slice, close selector |
+| `Mode_DIGU` | (8, 216) - (236, 312) | All bands | Set mode on active slice, close selector |
+| `Modes_Cancel` | (244, 216) - (472, 312) | Always | Close selector, keep the band change |
+
+Notes on the `BANDMODE` mode page:
+
+- Choosing a mode is optional. Cancel, or letting the page time out, keeps the band change already made and leaves the mode as the radio set it.
+- A 5 px marker shows which tile matches the mode the radio is currently in. It updates as the radio's band stack settles after the band change, so it may move a moment after the page opens.
+- 30 m is a CW and digital band with no phone allocation, so USB and LSB are disabled there.
+- Only USB is used on 60 m, so LSB is disabled there.
+- FM is disabled below 10 m. Wide modes on the lower bands are discouraged by band plan recommendations. This is guidance rather than a legal restriction, so the rule is a convenience default.
+- A mode chosen within 750 ms of the band change is held briefly before being sent, so it cannot be overwritten by the radio's band stack recall. The selector stays open until it has been sent.
 
 ### Menu screen
 
@@ -189,7 +226,7 @@ When the menu is open (`MenuActive == true`), the display switches to a list vie
 
 ### Developer notes
 
-The main-screen touch dispatch lives in `tm_touch.h`. The Profile Selector modal is handled in `tm_profile_select.cpp`. Raw-touch-to-pixel calibration constants are in `tm_touch_helpers.h`. The main touch entry point is in `TeensyMaestro.ino` (look for `GotTouch` and `TouchDispatch`).
+The main-screen touch dispatch lives in `tm_touch.h`. The QSY Selector modal is handled in `tm_qsy_select.cpp`. Raw-touch-to-pixel calibration constants are in `tm_touch_helpers.h`. The main touch entry point is in `TeensyMaestro.ino` (look for `GotTouch` and `TouchDispatch`).
 
 ---
 

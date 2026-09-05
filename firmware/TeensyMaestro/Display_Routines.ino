@@ -13,6 +13,10 @@ static bool sClockWasVisible = false;
 // Call this BEFORE painting Slice B when it transitions Free -> Active.
 // It clears any pixels the clock may have left in that region, exactly once.
 void ClockWidget_OnSliceBActivated() {
+  // The QSY Selector owns the whole screen while it is open. Clearing
+  // the clock panel would blank a rectangle over its tile grid.
+  if (QsySel::isVisible()) return;
+
   if (sClockWasVisible) {
     UI_Clock_Clear();   // one-time clear so Slice B can paint over a clean area
     sClockWasVisible = false;
@@ -114,7 +118,16 @@ void ResetScreenSaver(const char* reason /*= nullptr*/)
     ScreenSaveActive = false;
     Splash           = false;
 
-    RefreshScreen();
+    // RefreshScreen() sets MenuActive = false as a side effect, which
+    // would disable the guards protecting the QSY Selector and let the
+    // main screen draw over it. Waking the screen can wait until the
+    // selector closes. The screensaver is still considered dismissed
+    // (flags above already cleared, panel already lit, keyer already
+    // restarted) since real activity happened; only the redraw is
+    // deferred.
+    if (!QsySel::isVisible()) {
+      RefreshScreen();
+    }
   }
 }
 

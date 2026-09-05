@@ -4,8 +4,10 @@
 // ============================================================================
 
 #include "tm_qsy_select.h"
+#include "tm_system_utils.h"
 
 extern bool MenuActive;
+extern int  SliceActiveVal;
 // --- Profile map sources defined elsewhere (MMConfig.ini overrides allowed) ---
 extern String CFG_Profile_Map_CW_160M; extern String CFG_Profile_Map_CW_80M;  extern String CFG_Profile_Map_CW_60M;
 extern String CFG_Profile_Map_CW_40M;  extern String CFG_Profile_Map_CW_30M;  extern String CFG_Profile_Map_CW_20M;
@@ -105,12 +107,33 @@ static Page s_page = Page::Hidden;
 static uint32_t s_lastActivityMs = 0;
 static bool     s_dirty          = false;
 static char     s_selectedBand[8] = {0};   // e.g. "20"
+
+// Slice mode currently marked by the highlight rectangle, in BANDMODE.
+// Set once when the mode page opens (from whatever mode the slice was
+// in before the band change), then kept in sync live by
+// QsySel::onRadioModeChanged() as the radio reports new modes, without
+// a full page redraw: the radio's band stack recall emits several mode
+// events right after a band change, and redrawing renderModes() on each
+// one (fillScreen plus six tiles) corrupts the display.
+static char s_highlightedMode[8];
 static BandTile s_bands[12];
 static ModeTile s_modes[6];
 
 // Deferred close after mode tap, and a small arm delay to avoid band→mode bounce
 static uint32_t s_deferredCloseAtMs = 0;
 static uint32_t s_touchArmUntilMs   = 0;   // while now < this, ignore touches in Modes page
+
+// BANDMODE only: time of the last fRig.setBand() call, and a mode chosen
+// while still inside the post band change settle window (empty = none).
+static uint32_t s_bandAppliedAtMs = 0;
+static char     s_pendingMode[8]  = {0};
+
+// A band change makes the radio recall its band stack, which can push
+// slice status updates including mode. Applying a mode too soon after
+// the band could race with that burst. The RCS QSY path uses the same
+// 750 ms quiet window after a profile load (QSY_SETTLE_MS in
+// tm_rcs_server.cpp). Not yet verified against a live radio.
+static constexpr uint32_t QSYSEL_BAND_SETTLE_MS = 750;
 
 // Basic palette fallbacks (RGB565)
 #ifndef COLOR_BLACK
@@ -149,6 +172,17 @@ static uint16_t COL_BTN_TXT  = COLOR_WHITE;
 static uint16_t COL_BTN_DIS  = COLOR_GRAY;
 static uint16_t COL_CANCEL   = COLOR_RED;
 
+// Highlight for the tile matching the slice's current mode.
+// Must contrast with COL_BTN and with the white tile outline.
+// Kept as COLOR_YELLOW rather than a different constant: this file
+// already uses COLOR_YELLOW as its one "this tile matters" color, for
+// the band and mode tap-confirmation flashes elsewhere in onTouch().
+// The visibility problem was the 1px width at a 2px inset next to a
+// 1px white outline at inset 0, not the hue; widening it to a 3px band
+// (see drawModeHighlight below) keeps the existing color language
+// consistent instead of adding a second accent color.
+static const uint16_t COL_MODE_HL = COLOR_YELLOW;
+
 // ----------------------- small helpers ---------------------------------------
 FLASHMEM static void beep_click() {
   if (BtnClickTone > 0 && BtnClickDur > 0) {
@@ -161,6 +195,24 @@ FLASHMEM static void setDefaultFont() {
   tft.setFont(FONT_TITLE);   // e.g. Arial_28_Bold
   tft.setTextSize(1);        // must be 1 when using setFont(...)
   tft.setTextColor(COL_TEXT);
+}
+
+// Fill color a mode tile is drawn with, matching the selection logic in
+// renderModes(). Factored out so the highlight erase step in
+// onRadioModeChanged() draws back the exact color renderModes() used,
+// including the disabled and Cancel cases.
+static uint16_t modeTileFillColor(const ModeTile &m) {
+  if (m.isCancel) return COL_CANCEL;
+  if (!m.enabled) return COL_BTN_DIS;
+  return COL_BTN;
+}
+
+// Draw the current mode marker: a 5px band just inside the tile's
+// own outline.
+static void drawModeHighlight(const Rect &r, uint16_t colour) {
+  for (int i = 2; i <= 6; ++i) {
+    tft.drawRect(r.x + i, r.y + i, r.w - 2 * i, r.h - 2 * i, colour);
+  }
 }
 
 FLASHMEM static void drawButton(const Rect &r, const char *label,
@@ -232,7 +284,10 @@ FLASHMEM static void layoutModes() {
   const int cellW = (W - totalGapsX) / cols;
   const int cellH = (H - totalGapsY) / rows;
 
-  const char* labels[6] = { "SSB", "CW", "FM", "DIGU", "", "Cancel" };
+  static const char* const kLabelsProfile[6]  = { "SSB", "CW", "FM", "DIGU", "", "Cancel" };
+  static const char* const kLabelsBandmode[6] = { "CW", "USB", "LSB", "FM", "DIGU", "Cancel" };
+  const char* const* labels =
+      (CFG_QsySel_Action == QSYSEL_ACTION_BANDMODE) ? kLabelsBandmode : kLabelsProfile;
 
   for (int i = 0; i < 6; ++i) {
     const int row = i / cols;
@@ -248,16 +303,49 @@ FLASHMEM static void layoutModes() {
 }
 
 FLASHMEM static void computeModeEnables() {
-  // FM disabled below 10m → only 10m and 6m enabled
-  // SSB disabled on 30m
   uint8_t meters = (uint8_t)atoi(s_selectedBand);
 
+  if (CFG_QsySel_Action == QSYSEL_ACTION_BANDMODE) {
+    for (int i = 0; i < 6; ++i) {
+      if (s_modes[i].isCancel) { s_modes[i].enabled = true; continue; }
+
+      const char* lab = s_modes[i].label;
+      bool en = true;
+
+      // FM is disabled on the lower bands because wide modes there are
+      // discouraged by band plan recommendations. This is guidance, not a
+      // legal restriction, so the rule is a convenience default rather
+      // than an enforcement.
+      if (strcmp(lab, "FM") == 0) {
+        en = (meters <= 10);
+      } else if (strcmp(lab, "USB") == 0) {
+        // 30 m is a CW and digital only band, no phone.
+        en = (meters != 30);
+      } else if (strcmp(lab, "LSB") == 0) {
+        // 30 m is a CW and digital only band, no phone. On 60 m only USB is
+        // used, matching the 60 m exception already present in
+        // FlexRig::toggleCW_SSB().
+        en = (meters != 30 && meters != 60);
+      }
+      // CW and DIGU match neither rule above, so they stay enabled.
+      s_modes[i].enabled = en;
+    }
+    return;
+  }
+
+  // FM disabled below 10m → only 10m and 6m enabled
+  // SSB disabled on 30m
   for (int i = 0; i < 6; ++i) {
     if (s_modes[i].label[0] == '\0') { s_modes[i].enabled = false; continue; }
     if (s_modes[i].isCancel) { s_modes[i].enabled = true; continue; }
 
     const char* lab = s_modes[i].label;
     bool en = true;
+
+    // FM is disabled on the lower bands because wide modes there are
+    // discouraged by band plan recommendations. This is guidance, not a
+    // legal restriction, so the rule is a convenience default rather
+    // than an enforcement.
     if (strcmp(lab, "FM") == 0) {
       en = (meters <= 10);
     } else if (strcmp(lab, "SSB") == 0) {
@@ -284,18 +372,24 @@ FLASHMEM static void renderBands() {
 FLASHMEM static void renderModes() {
   tft.fillScreen(COL_BG);    // full black
   setDefaultFont();
+
+  // In BANDMODE, highlight the tile that matches s_highlightedMode.
+  // QsySel::onRadioModeChanged() keeps that in sync as the radio
+  // reports new modes; renderModes() just draws whatever is current.
+  const bool showActiveMode = (s_highlightedMode[0] != '\0');
+
   // Uniform blue buttons for all modes; red for Cancel; gray for disabled
   for (int i = 0; i < 6; ++i) {
     const ModeTile& m = s_modes[i];
-    uint16_t fill = m.isCancel ? COL_CANCEL : COL_BTN;
-    uint16_t out  = COL_BTN_OUT;
-    uint16_t txt  = COL_BTN_TXT;
+    const uint16_t fill = modeTileFillColor(m);
+    const uint16_t out  = COL_BTN_OUT;
+    const uint16_t txt  = (!m.enabled && !m.isCancel) ? COLOR_BLACK : COL_BTN_TXT;
 
-    if (!m.enabled && !m.isCancel) {
-      fill = COL_BTN_DIS;
-      txt  = COLOR_BLACK;
-    }
     drawButton(m.r, m.label, fill, out, txt);
+
+    if (showActiveMode && !m.isCancel && strcmp(s_highlightedMode, m.label) == 0) {
+      drawModeHighlight(m.r, COL_MODE_HL);
+    }
   }
 }
 
@@ -323,9 +417,30 @@ static void applyProfileAndClose(const char* bandMeters, const char* mode) {
   QsySel::close();
 }
 
+static void applyBandModeAndArmClose(const char* mode) {
+  const uint32_t now = millis();
+
+  if ((now - s_bandAppliedAtMs) >= QSYSEL_BAND_SETTLE_MS) {
+    if ((SliceActiveVal >= 0) && (SliceActiveVal < fRig.nMaxSlice)) {
+      fRig.setMode(SliceActiveVal, mode);
+    }
+    s_deferredCloseAtMs = now + (uint32_t)CFG_Profile_Selector_Close_Delay_Ms;
+  } else {
+    // Still inside the post band change settle window. Defer the mode
+    // change to tick() so it cannot race the radio's band stack recall.
+    strncpy(s_pendingMode, mode, sizeof(s_pendingMode) - 1);
+    s_pendingMode[sizeof(s_pendingMode) - 1] = '\0';
+    // s_deferredCloseAtMs is armed later, by tick(), once the pending
+    // mode has actually been sent.
+  }
+}
+
 static void openBandsPage() {
   s_selectedBand[0] = '\0';
   s_deferredCloseAtMs = 0;
+  s_bandAppliedAtMs = 0;
+  s_pendingMode[0]  = '\0';
+  s_highlightedMode[0] = '\0';
   layoutBands();
   switchPage(Page::Bands);
   resetTimeout();
@@ -334,6 +449,15 @@ static void openBandsPage() {
 }
 
 static void openModesPage() {
+  s_highlightedMode[0] = '\0';
+  if (CFG_QsySel_Action == QSYSEL_ACTION_BANDMODE &&
+      SliceActiveVal >= 0 && SliceActiveVal < fRig.nMaxSlice) {
+    const String m = fRig.slice[SliceActiveVal].mode;
+    strncpy(s_highlightedMode, m.c_str(),
+            sizeof(s_highlightedMode) - 1);
+    s_highlightedMode[sizeof(s_highlightedMode) - 1] = '\0';
+  }
+
   layoutModes();
   computeModeEnables();
   switchPage(Page::Modes);
@@ -418,6 +542,18 @@ void tick() {
 
   const uint32_t now = millis();
 
+  // BANDMODE: fire a mode change that was deferred because it landed
+  // inside the post band change settle window. Runs before the deferred
+  // close and idle timeout checks so a pending setMode is never dropped.
+  if (s_pendingMode[0] != '\0' &&
+      (now - s_bandAppliedAtMs) >= QSYSEL_BAND_SETTLE_MS) {
+    if ((SliceActiveVal >= 0) && (SliceActiveVal < fRig.nMaxSlice)) {
+      fRig.setMode(SliceActiveVal, s_pendingMode);
+    }
+    s_pendingMode[0] = '\0';
+    s_deferredCloseAtMs = now + (uint32_t)CFG_Profile_Selector_Close_Delay_Ms;
+  }
+
   // Perform deferred close, then exit
   if (s_deferredCloseAtMs && now >= s_deferredCloseAtMs) {
     s_deferredCloseAtMs = 0;
@@ -425,8 +561,10 @@ void tick() {
     return;
   }
 
-  // Idle timeout
-  if ((now - s_lastActivityMs) >= (uint32_t)CFG_Profile_Selector_Timeout_Ms) {
+  // Idle timeout is suppressed while a BANDMODE mode change is still
+  // pending, so the selector cannot close before it is sent.
+  if (s_pendingMode[0] == '\0' &&
+      (now - s_lastActivityMs) >= (uint32_t)CFG_Profile_Selector_Timeout_Ms) {
     close();
     return;
   }
@@ -439,7 +577,51 @@ void tick() {
   }
 }
 
-void renderIfDirty() { s_dirty = true; }
+// Request a redraw on the next tick(). Safe to call from event callbacks:
+// it never touches the display itself.
+void markDirty() {
+  if (s_page != Page::Hidden) s_dirty = true;
+}
+
+// Update the BANDMODE mode highlight in place. Called from
+// onSlice_mode() when the radio reports a new mode. Redraws only
+// the two affected highlight rectangles, never the whole page,
+// because a full redraw from an event callback corrupts the
+// display.
+void onRadioModeChanged() {
+  if (s_page != Page::Modes) return;
+  if (CFG_QsySel_Action != QSYSEL_ACTION_BANDMODE) return;
+  if (SliceActiveVal < 0 || SliceActiveVal >= fRig.nMaxSlice) return;
+
+  char newMode[8];
+  const String m = fRig.slice[SliceActiveVal].mode;
+  strncpy(newMode, m.c_str(), sizeof(newMode) - 1);
+  newMode[sizeof(newMode) - 1] = '\0';
+
+  if (strcmp(newMode, s_highlightedMode) == 0) return;
+
+  // Erase the highlight from whichever tile currently carries it, using
+  // the same fill color renderModes() would draw for that tile.
+  for (int i = 0; i < 6; ++i) {
+    const ModeTile &tile = s_modes[i];
+    if (!tile.isCancel && strcmp(s_highlightedMode, tile.label) == 0) {
+      drawModeHighlight(tile.r, modeTileFillColor(tile));
+      break;
+    }
+  }
+
+  strncpy(s_highlightedMode, newMode, sizeof(s_highlightedMode) - 1);
+  s_highlightedMode[sizeof(s_highlightedMode) - 1] = '\0';
+
+  // Draw the highlight on the tile matching the new mode, if any.
+  for (int i = 0; i < 6; ++i) {
+    const ModeTile &tile = s_modes[i];
+    if (!tile.isCancel && strcmp(s_highlightedMode, tile.label) == 0) {
+      drawModeHighlight(tile.r, COL_MODE_HL);
+      break;
+    }
+  }
+}
 
 FLASHMEM void onTouch(int16_t x, int16_t y, bool isRelease)
 {
@@ -469,6 +651,22 @@ FLASHMEM void onTouch(int16_t x, int16_t y, bool isRelease)
 
       // Store selected band and move to Modes page
       snprintf(s_selectedBand, sizeof(s_selectedBand), "%u", (unsigned)b.meters);
+
+      if (CFG_QsySel_Action == QSYSEL_ACTION_BANDMODE) {
+        // Same sequence as Process_Buttons.ino case BtnMenuSetBand:, but
+        // using a local instead of the shared ActivePan global, which this
+        // code has no reason to modify.
+        if ((SliceActiveVal >= 0) && (SliceActiveVal < fRig.nMaxSlice)) {
+          const uint32_t panHandle = (uint32_t)fRig.slice[SliceActiveVal].pan;
+          if (panHandle > 0) {
+            const int idx = TMU_HandleToPanIndexSafe(
+                panHandle, TMU_ArrayLen(fRig.panadapter));
+            if (idx >= 0) fRig.setBand(idx, b.meters);
+          }
+        }
+        s_bandAppliedAtMs = millis();
+      }
+
       openModesPage();      // sets s_page to Modes and renders, also arms s_touchArmUntilMs
       return;
     }
@@ -495,6 +693,15 @@ FLASHMEM void onTouch(int16_t x, int16_t y, bool isRelease)
 
       if (m.isCancel) {
         beep_click();
+        if (s_pendingMode[0] != '\0') {
+          // A mode was already chosen and was only waiting out the post
+          // band change settle window. The user made that choice; Cancel
+          // closes the selector, it does not undo a completed selection.
+          if ((SliceActiveVal >= 0) && (SliceActiveVal < fRig.nMaxSlice)) {
+            fRig.setMode(SliceActiveVal, s_pendingMode);
+          }
+          s_pendingMode[0] = '\0';
+        }
         close();            // MenuActive = false inside close()
         return;
       }
@@ -508,10 +715,14 @@ FLASHMEM void onTouch(int16_t x, int16_t y, bool isRelease)
       tft.drawRect(m.r.x + 2, m.r.y + 2, m.r.w - 4, m.r.h - 4, COLOR_YELLOW);
       delay(60);
 
-      // Apply the selected band+mode profile and close after a short delay
       beep_click();
-      s_deferredCloseAtMs = millis() + (uint32_t)CFG_Profile_Selector_Close_Delay_Ms;
-      applyProfileAndClose(s_selectedBand, m.label);
+      if (CFG_QsySel_Action == QSYSEL_ACTION_BANDMODE) {
+        applyBandModeAndArmClose(m.label);
+      } else {
+        // Apply the selected band+mode profile and close after a short delay
+        s_deferredCloseAtMs = millis() + (uint32_t)CFG_Profile_Selector_Close_Delay_Ms;
+        applyProfileAndClose(s_selectedBand, m.label);
+      }
       return;
     }
     // Tap outside any tile: ignore
