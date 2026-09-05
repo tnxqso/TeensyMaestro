@@ -17,7 +17,7 @@
 #pragma once
 #include <Arduino.h>
 #include "tm_touch_helpers.h"
-#include "tm_profile_select.h"
+#include "tm_qsy_select.h"
 
 #ifndef TM_LONG_MS
 #define TM_LONG_MS 700
@@ -103,7 +103,7 @@ enum class TM_TouchAction : uint8_t {
   ResetScreen,
   MenuExitAction,
   SplashShow,
-  ProfileSelOpen,
+  QsySelOpen,
   EncoderWrite,
   // bottom placeholders
   Bot1,
@@ -246,12 +246,12 @@ static inline void TM_ResetPressState() {
 /***************************** TouchDispatch ***************************/
 FLASHMEM void TouchDispatch()
 {
-  // === Modal routing for Profile Selector (no special center-long anymore) ===
-  if (ProfileSel::isVisible()) {
+  // === Modal routing for QSY Selector (no special center-long anymore) ===
+  if (QsySel::isVisible()) {
     while (touch.touched()) {
       TM_TouchPoint tp = TM_ReadTouchMapped();
       if (!tp.valid) continue;
-      ProfileSel::onTouch(tp.x, tp.y, false);
+      QsySel::onTouch(tp.x, tp.y, false);
     }
     TM_ResetPressState();
     return;
@@ -505,10 +505,10 @@ FLASHMEM void TouchDispatch()
       case TM_PressKind::Center: {
         const bool allowCenterShort = (fRig.connected) && (!FlexIsHeadless());
         if (allowCenterShort) {
-          TM_ACT(TM_TouchAction::ProfileSelOpen,
-                F("ProfileSel::open()"),
+          TM_ACT(TM_TouchAction::QsySelOpen,
+                F("QsySel::open()"),
                 F("[DRY RUN] Center area SHORT (allowed)"),
-                { ProfileSel::open(); });
+                { QsySel::open(); });
         } else {
           TM_ACT(TM_TouchAction::CenterShortBlocked,
                 F(""),

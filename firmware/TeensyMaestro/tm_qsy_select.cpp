@@ -1,9 +1,9 @@
 // ============================================================================
-// tm_profile_select.cpp
-// Modal Band→Mode profile selector for TeensyMaestro
+// tm_qsy_select.cpp
+// Modal Band→Mode QSY selector for TeensyMaestro
 // ============================================================================
 
-#include "tm_profile_select.h"
+#include "tm_qsy_select.h"
 
 extern bool MenuActive;
 // --- Profile map sources defined elsewhere (MMConfig.ini overrides allowed) ---
@@ -320,7 +320,7 @@ static void applyProfileAndClose(const char* bandMeters, const char* mode) {
   fRig.loadGlobalProfile(profName);
 
   // Properly close the selector (toggles MenuActive=false and redraws UI)
-  ProfileSel::close();
+  QsySel::close();
 }
 
 static void openBandsPage() {
@@ -350,7 +350,7 @@ static void openModesPage() {
 } // namespace
 
 // ------------------------------- Public API -----------------------------------
-namespace ProfileSel {
+namespace QsySel {
 
 FLASHMEM String profileNameForBandMode(int meters, const char* mode) {
   if (mode == nullptr || mode[0] == '\0') {
@@ -393,7 +393,7 @@ FLASHMEM void open() {
   if (!canOpen()) return;
   MenuActive = true;
 #if DEBUG_TOUCH == 1
-  Serial.println(F("[ProfileSel] open → MenuActive=1"));
+  Serial.println(F("[QsySel] open → MenuActive=1"));
 #endif
   openBandsPage();
 }
@@ -402,7 +402,7 @@ FLASHMEM void close() {
   switchPage(Page::Hidden);
   MenuActive = false;
 #if DEBUG_TOUCH == 1
-  Serial.println(F("[ProfileSel] close → MenuActive=0"));
+  Serial.println(F("[QsySel] close → MenuActive=0"));
 #endif
   // Force a clean redraw of the base UI to avoid remnants/overdraw
   //ResetTFTScreen();
@@ -521,4 +521,4 @@ FLASHMEM void onTouch(int16_t x, int16_t y, bool isRelease)
   // Hidden or unknown page: do nothing
 }
 
-} // namespace ProfileSel
+} // namespace QsySel

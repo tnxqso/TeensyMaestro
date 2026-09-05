@@ -833,7 +833,7 @@ bool TM_RCS_RequestFreq(long freqHz)
 // Resolve a band and mode bucket to a global profile name, and verify that
 // the radio actually knows that profile.
 //
-// meters must be one of the values accepted by ProfileSel, mode one of
+// meters must be one of the values accepted by QsySel, mode one of
 // "CW", "SSB", "FM", "DIGU".
 //
 // Returns:
@@ -847,7 +847,7 @@ bool TM_RCS_RequestFreq(long freqHz)
 // shortly after boot is not rejected for the wrong reason.
 int TM_RCS_ProfileForBandMode(int meters, const char* mode, String& out)
 {
-  out = ProfileSel::profileNameForBandMode(meters, mode);
+  out = QsySel::profileNameForBandMode(meters, mode);
 
   if (out.length() == 0) {
     return -1;

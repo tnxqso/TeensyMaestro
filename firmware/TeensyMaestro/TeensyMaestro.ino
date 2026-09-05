@@ -18,7 +18,7 @@
 #include "tm_sketch_api.h"
 #include "tm_attr.h"
 
-#include "tm_profile_select.h"
+#include "tm_qsy_select.h"
 
 #if defined(__INTELLISENSE__)
   // Local IntelliSense-only aggregation header, safe to ignore for builds
@@ -463,8 +463,10 @@ enum TM_ConnectionMode {
 };
 
 // -----------------------------------------------------------------------------
-// Profile Selector configuration (defaults)
+// QSY Selector configuration (defaults)
 // -----------------------------------------------------------------------------
+
+QsySelAction CFG_QsySel_Action = QSYSEL_ACTION_PROFILE;  // legacy default
 
 // Timing (ms)
 uint16_t CFG_Profile_Selector_Timeout_Ms     = 5000; // total idle timeout
@@ -1472,7 +1474,7 @@ void loop()
   }
 
   SpotPusher::tick();
-  ProfileSel::tick();
+  QsySel::tick();
 
 }  // End loop
 

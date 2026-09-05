@@ -20,7 +20,7 @@
 #include "ClockWidget.h"
 #include "ui_clockpanel.h"
 #include "tm_time.h"     // TMTime_nowUTC(), TMTime_strftime(), TMTime_is12h(), TMTime_showSeconds(), TMTime_hasTime()
-#include "tm_profile_select.h"   // ProfileSel::isVisible()
+#include "tm_qsy_select.h"   // QsySel::isVisible()
 #include <Arduino.h>
 
 extern bool MenuActive;   // true while any menu is shown
@@ -135,7 +135,7 @@ FLASHMEM void ClockWidget_Loop() {
   if (!s_uiReady) return;
 
   // Suppress the clock when overlays are active (menu, splash, band/mode selector)
-  if (MenuActive || Splash || ProfileSel::isVisible()) {
+  if (MenuActive || Splash || QsySel::isVisible()) {
     if (s_panelActive) {
       s_panelActive = false;
       invalidate_all();  // clean slate when overlays go away

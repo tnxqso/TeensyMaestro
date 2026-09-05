@@ -1621,7 +1621,23 @@ if (InSetup && InBufUC.indexOf("CW FARNSWORTH:") >= 0) {
     return;
   }
 
-  // --- Profile Selector: timing -------------------------------------------------
+  // --- QSY Selector: action ----------------------------------------------------
+  if (InSetup && InBufUC.indexOf("SELECTOR ACTION:") >= 0) {
+    String v  = ParseStringValue(line, "Selector Action:", "");
+    String vu = v;
+    vu.toUpperCase();
+
+    if (vu == "PROFILE") {
+      CFG_QsySel_Action = QSYSEL_ACTION_PROFILE;
+    } else if (vu == "BANDMODE") {
+      CFG_QsySel_Action = QSYSEL_ACTION_BANDMODE;
+    } else {
+      setParseError("Selector Action:", v, "expected 'PROFILE' or 'BANDMODE'");
+    }
+    return;
+  }
+
+  // --- QSY Selector: timing -------------------------------------------------
   if (InSetup && InBufUC.indexOf("PROFILE SELECTOR TIMEOUT MS:") >= 0) {
     CFG_Profile_Selector_Timeout_Ms = ParseIntValue(
         line, "Profile Selector Timeout Ms:", CFG_Profile_Selector_Timeout_Ms, 500, 30000);
@@ -1634,7 +1650,7 @@ if (InSetup && InBufUC.indexOf("CW FARNSWORTH:") >= 0) {
     return;
   }
 
-  // --- Profile Selector: mode visibility ---------------------------------------
+  // --- QSY Selector: mode visibility ---------------------------------------
   if (InSetup && InBufUC.indexOf("MODE VISIBLE SSB:") >= 0) {
     CFG_Mode_Visible_SSB = ParseBoolYN(line, CFG_Mode_Visible_SSB);
     return;
@@ -1652,7 +1668,7 @@ if (InSetup && InBufUC.indexOf("CW FARNSWORTH:") >= 0) {
     return;
   }
 
-  // --- Profile Selector: explicit profile name overrides -----------------------
+  // --- QSY Selector: explicit global profile name overrides -----------------------
   // NOTE: detect with InBufUC, but parse from 'line' to preserve case/spacing.
 
   // CW

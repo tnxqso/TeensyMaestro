@@ -1,6 +1,6 @@
 // ============================================================================
-// tm_profile_select.h
-// Modal Band→Mode profile selector for TeensyMaestro
+// tm_qsy_select.h
+// Modal Band→Mode QSY selector for TeensyMaestro
 // ============================================================================
 
 #pragma once
@@ -16,12 +16,27 @@ extern const byte STPin;
 extern const int  BtnClickDur;
 extern const int  BtnClickTone;
 
+// QSY Selector action, set by the "Selector Action" key in MMConfig.ini.
+//   QSYSEL_ACTION_PROFILE  - compose a SmartSDR global profile name from
+//                            the selected band and mode, and load it.
+//   QSYSEL_ACTION_BANDMODE - apply the band directly to the panadapter
+//                            owning the active slice, then optionally
+//                            apply a mode to that slice.
+enum QsySelAction : uint8_t {
+  QSYSEL_ACTION_PROFILE  = 0,
+  QSYSEL_ACTION_BANDMODE = 1
+};
+extern QsySelAction CFG_QsySel_Action;
+
+// Names kept as-is: they mirror the MMConfig.ini keys
+// "Profile Selector Timeout Ms" and "Profile Selector Close Delay
+// Ms" one to one. Renaming them would break that mapping.
 extern uint16_t CFG_Profile_Selector_Timeout_Ms;
-extern uint16_t CFG_Profile_Selector_Close_Delay_Ms; 
+extern uint16_t CFG_Profile_Selector_Close_Delay_Ms;
 
 bool FlexIsHeadless();
 
-namespace ProfileSel {
+namespace QsySel {
 
 // API
 void open();                         // Open if connected, not headless, not TX
@@ -40,4 +55,4 @@ void renderIfDirty();                // Optional explicit redraw
 // can distinguish a real mapping from a bad request.
 String profileNameForBandMode(int meters, const char* mode);
 
-} // namespace ProfileSel
+} // namespace QsySel
