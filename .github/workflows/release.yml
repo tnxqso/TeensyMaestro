@@ -15,6 +15,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      # The tag and TM_VERSION are maintained independently, so they can
+      # drift. A mismatch would publish a release named after one version
+      # containing a hex file named after another. Fail early instead.
+      - name: Verify tag matches TM_VERSION
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          SRC=$(grep -oP '#define\s+TM_VERSION\s+"\K[^"]+' firmware/TeensyMaestro/tm_config.h)
+          echo "Tag version:    $TAG"
+          echo "Source version: $SRC"
+          if [ -z "$SRC" ]; then
+            echo "::error::Could not read TM_VERSION from firmware/TeensyMaestro/tm_config.h"
+            exit 1
+          fi
+          if [ "$TAG" != "$SRC" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match TM_VERSION $SRC in tm_config.h"
+            exit 1
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
