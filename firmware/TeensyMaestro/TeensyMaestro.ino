@@ -1405,7 +1405,9 @@ void loop()
   {
     int applied = -1;
 
-    if (GotSpeedParm) {
+    // A sync request raised during the local WPM holdoff stays pending and
+    // runs once when the holdoff expires, so radio updates are not lost.
+    if (GotSpeedParm && !TMU_LocalWpmHoldoffActive()) {
       GotSpeedParm = false;
       TMU_SyncCwWpm(/*preserveBaseline=*/false, &applied, "loop:parm");
     }
@@ -1452,6 +1454,9 @@ void loop()
   {
     if (!StandAlone)
     {
+      // Connection lost: forget per-connection CW WPM sync state so the
+      // first encoder change after reconnect is always sent.
+      TMU_ResetCwWpmSyncState();
       TimeIt = millis();
       while (!fRig.connected)
       {

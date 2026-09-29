@@ -267,7 +267,7 @@ void Keyer_Beep(uint16_t freq, uint16_t ms) {
     tone(LOCAL_STPin, freq, ms);
 }
 
-void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline)
+void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline, bool fromRadio)
 {
   // FIX 1: Stale Encoder Guard (Race Condition Protection)
   // If a WPM update from Host is pending processing in KeyerLoop,
@@ -294,7 +294,11 @@ void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline)
     g_lastHostWpm = -1;
 
     CWValSave = CWVal;
-    TMU_MarkLocalWpmSet();
+    // Only local changes (encoder, UI, config) arm the holdoff. A value
+    // adopted from the radio must not suppress the next radio update.
+    if (!fromRadio) {
+      TMU_MarkLocalWpmSet();
+    }
     if (TM_WK_Protocol::active()) {
         TM_WK_Protocol::active()->setLocalBaseline((uint8_t)CWVal);
     }

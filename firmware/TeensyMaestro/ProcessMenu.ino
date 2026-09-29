@@ -615,7 +615,17 @@ FLASHMEM void MenuExit()
   {
     case Enc9_CWSpeed:  // CW Speed
       // Load the baseline into live values, but do not move the baseline.
-      Keyer_Apply_Wpm(CWValSave, true);  // preserveBaseline = true
+      // The menu used this encoder for navigation, so only the encoder
+      // position is restored here, like the other Enc9 modes. Opening a menu
+      // does not change the speed, so CWVal and the keyer engine are left as
+      // they are. Keyer_Apply_Wpm() is not used: its echo check can return
+      // before the encoder write, which left the encoder at a menu index and
+      // made HandleEnc9_CWSpeed() apply and send that index as a speed.
+      // CWValSave is what HandleEnc9_CWSpeed() compares against, so this
+      // position means "no change": nothing is applied or sent to the radio.
+      debug("CW Speed: ");
+      debugln(CWValSave);
+      CWMicEnc.write(CWValSave * CWEncSteps);
       break;
 
     case Enc9_MicGain:  // Mic Gain

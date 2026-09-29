@@ -91,9 +91,15 @@ BootInfo BuildBootInfo();
 // -----------------------------------------------------------------------------
 //
 // Rationale:
-//  - Flex publishes CW speed in two places. 'cwx.wpm' tends to reflect the
-//    user's intended CW speed early in the session, while 'transmit.speed'
-//    may be stale (often 30) until the radio has actually keyed CW.
+//  - Flex publishes CW speed in two places: 'cwx wpm=' and 'transmit speed='.
+//    'cwx wpm=' follows every speed change ("cw wpm N" from TM CE, other
+//    clients such as SmartSDR or AetherSDR, raw API commands). On some radios
+//    'transmit speed=' stays frozen (for example at 30) through profile loads,
+//    mode changes, speed changes and CW keying, even though the radio sends it
+//    before every PTT cycle. It has tracked on other radios, so it cannot be
+//    trusted either way.
+//  - fRig.cwx.wpm is therefore the only radio source for CW speed.
+//    fRig.transmit.speed is never adopted.
 //  - To avoid duplicating this logic across the sketch, these helpers centralize
 //    how we read and validate the CW speed and how we reason about TX mode.
 //
@@ -108,13 +114,16 @@ bool TMU_TxIsCw();
 // Clamp a WPM value to a sane range (inclusive).
 int TMU_ClampWpm(int wpm);
 
+// Returned by TMU_GetReportedCwWpm() when the radio has no valid CW speed.
+constexpr int TMU_WPM_UNKNOWN = -1;
+
 // Single source of truth for fetching CW WPM from the radio:
 //  - Requires fRig.connected to consider radio values.
-//  - Prefers cwx.wpm when available (>0), clamped via TMU_ClampWpm.
-//  - Falls back to transmit.speed only if TX mode is known AND CW.
-//  - If no valid radio value is available, returns the current global CWVal.
-//
-// Always returns a positive WPM.
+//  - Returns fRig.cwx.wpm, clamped via TMU_ClampWpm, when it is valid (>0).
+//  - Not mode dependent: cwx.wpm is the radio's keyer speed in every mode.
+//  - Rejects exactly 5 WPM while CWVal is not 5 (profile load glitch).
+//  - Otherwise returns TMU_WPM_UNKNOWN; callers must keep the current WPM.
+//  - Never falls back to transmit.speed.
 int TMU_GetReportedCwWpm();
 
 // Debug helper: log a compact snapshot of CW/WPM-related state exactly once
@@ -135,7 +144,8 @@ bool TMU_AdoptCwWpmIfValid(bool onlyWhenCwMode,
 // Mode-aware sync policy (loop/event usage):
 //  - Uses TMU_GetReportedCwWpm() as the sole radio source.
 //  - Debounces against current CWVal.
-//  - Skips if rig not connected or TX mode unknown/empty (handled in getter).
+//  - Skips if rig not connected, the local holdoff is active, or the getter
+//    returns TMU_WPM_UNKNOWN.
 //
 // Returns true if a new WPM was applied. Writes the applied WPM to outAppliedWpm if provided.
 bool TMU_SyncCwWpm(bool preserveBaseline,
@@ -145,7 +155,21 @@ bool TMU_SyncCwWpm(bool preserveBaseline,
 // Mark that a local (encoder/UI) WPM change was just applied.
 // Suppresses TMU_SyncCwWpm() for 600ms to prevent the radio's
 // stale echo from overriding the change before it echoes back.
+// Not called for values adopted from the radio. Sync requests raised during
+// the holdoff are deferred (GotSpeedParm stays set), not dropped.
 void TMU_MarkLocalWpmSet();
+
+// True while the local WPM holdoff is active.
+bool TMU_LocalWpmHoldoffActive();
+
+// Encoder traffic guard: the last WPM TM CE sent with "cw wpm N".
+// TMU_WPM_UNKNOWN means the next encoder value is always sent.
+int  TMU_LastSentCwWpm();
+void TMU_NoteCwWpmSent(int wpm);
+
+// Reset per-connection CW WPM sync state (last sent value, holdoff).
+// Call when the radio connection is lost, before reconnecting.
+void TMU_ResetCwWpmSyncState();
 
 // Unified cooperative service pump for TeensyMaestro subsystems.
 // Used to keep network I/O, event dispatching, and background tasks flowing

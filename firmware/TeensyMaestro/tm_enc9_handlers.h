@@ -37,6 +37,7 @@
 #include "tm_enc_helpers.hpp"
 #include <EEPROM.h>
 #include "tm_system_utils.h"
+#include "tm_qsy_select.h"   // QsySel::isVisible()
 
 // [SERNUM-HELPERS] --- EEPROM commit helpers for contest serial number
 // NOTE: EEPROM.get() is called once in Setup via GetEEPROM().
@@ -88,7 +89,7 @@ static void HandleEnc9_CWSpeed() {
   CWValSave = newWpm;
 
   enc_write_quantized(CWMicEnc, newWpm, CWEncSteps);
-  Keyer_Apply_Wpm(newWpm, /*preserveBaseline=*/false);
+  Keyer_Apply_Wpm(newWpm, /*preserveBaseline=*/false, /*fromRadio=*/false);
 
   if (fRig.connected) {
     const bool headless = FlexIsHeadless();
@@ -105,8 +106,12 @@ static void HandleEnc9_CWSpeed() {
       // TRAFFIC GUARD: Only send command if the radio value actually differs.
       // This prevents feedback loops where the radio confirms a value, 
       // and we immediately send it back, creating a network storm.
-      if (fRig.transmit.speed != newWpm) {
+      // Compare against the last value TM CE sent, not a radio field: the
+      // echo arrives later, so 30 -> 29 -> 30 before the echo would otherwise
+      // skip the final 30.
+      if (TMU_LastSentCwWpm() != newWpm) {
         fRig.setCwSpeed(newWpm);
+        TMU_NoteCwWpmSent(newWpm);
       }
     }
   }
@@ -413,6 +418,17 @@ static inline void ReadCWMicEnc()
   if (HandleMenu_SerNum())     return;
   if (HandleMenu_RFPower())    return;
   if (HandleMenu_MicGain())    return;
+
+  // The QSY Selector sets MenuActive but is not a list menu and does not use
+  // this encoder. List-menu navigation would rewrite the encoder and draw row
+  // outlines over the selector, so it is skipped while the selector is shown.
+  // MenuItemIDX is held at 0 so a menu button press while the selector is
+  // shown keeps its current effect (item 0 means exit via MenuExit()).
+  if (QsySel::isVisible()) {
+    MenuItemIDX = 0;
+    return;
+  }
+
   if (HandleMenu_Navigation()) return;
 
   // If nothing matched, fall through (no-op) to keep existing semantics.

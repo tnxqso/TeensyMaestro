@@ -29,7 +29,7 @@ void TeensyMaestroSetup();
 
 void KeyerSetup();
 void KeyerLoop(); // Now a stub/dummy
-void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline);
+void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline, bool fromRadio);
 void Keyer_Recalc_Timing();
 void Keyer_AbortNow();
 
@@ -115,6 +115,7 @@ void onTransmit_vox_level(void);
 void onTransmit_vox_delay(void);
 void onTransmit_mic_level(void);
 void onTransmit_speed(void);
+void onCwx_wpm(void);
 void onTransmit_break_in(void);
 void onTransmit_break_in_delay(void);
 void onTransmit_mon_gain_sb(void);

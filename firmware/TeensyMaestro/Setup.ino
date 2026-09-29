@@ -553,7 +553,7 @@ FLASHMEM void TeensyMaestroSetup()
   {
     StandAlone = true;
     debugln("Not connected to Flex (StandAlone Keyer mode)");
-    Keyer_Apply_Wpm(CWVal /* already set from INI */, false);
+    Keyer_Apply_Wpm(CWVal /* already set from INI */, false, /*fromRadio=*/false);
     UI_Boot::Prog(BootStage::InitNetwork, "Not connected to Flex");
   } // End if ftRig.Connected
 

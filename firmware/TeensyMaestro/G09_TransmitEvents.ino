@@ -6,6 +6,7 @@ static void onTransmit_vox_level_wrap() { onTransmit_vox_level(); }
 static void onTransmit_vox_delay_wrap() { onTransmit_vox_delay(); }
 static void onTransmit_mic_level_wrap() { onTransmit_mic_level(); }
 static void onTransmit_speed_wrap() { onTransmit_speed(); }
+static void onCwx_wpm_wrap() { onCwx_wpm(); }
 static void onTransmit_break_in_wrap() { onTransmit_break_in(); }
 static void onTransmit_break_in_delay_wrap() { onTransmit_break_in_delay(); }
 static void onTransmit_mon_gain_sb_wrap() { onTransmit_mon_gain_sb(); }
@@ -31,6 +32,8 @@ void configureTransmitEvents()
   // fRig.transmit.attach_dax_event(onTransmit_dax_wrap);
   // fRig.transmit.attach_pitch_event(onTransmit_pitch_wrap);
   fRig.transmit.attach_speed_event(onTransmit_speed_wrap);
+  // CW speed comes from 'cwx wpm=', not from 'transmit speed='.
+  fRig.cwx.attach_wpm_event(onCwx_wpm_wrap);
   // fRig.transmit.attach_iambic_event(onTransmit_iambic_wrap);
   // fRig.transmit.attach_iambic_mode_event(onTransmit_iambic_mode_wrap);
   // fRig.transmit.attach_cwl_enabled_event(onTransmit_cwl_enabled_wrap);
@@ -214,20 +217,36 @@ void onTransmit_speed()
     return;
   }
 
-  // Read reported WPM from radio (do NOT apply here)
+  // Diagnostics only. CW speed is taken from 'cwx wpm=' (see onCwx_wpm).
+  // 'transmit speed=' can stay frozen (for example at 30) and is sent before
+  // every PTT cycle, so it must not trigger a WPM sync.
   const int reported = fRig.transmit.speed;
-  debug("onTransmit_speed: reported=");
+  debug("onTransmit_speed: reported (not used)=");
   debugln(reported);
+}
 
-  if (reported <= 0) {
-    debugln("onTransmit_speed: invalid (<=0) -> ignore");
+void onCwx_wpm()
+{
+  // Only act when not headless (same policy as the former onTransmit_speed)
+  if (FlexIsHeadless()) {
+    debugln("onCwx_wpm: headless -> ignore");
     return;
   }
 
+  const int reported = fRig.cwx.wpm;
+  debug("onCwx_wpm: reported=");
+  debugln(reported);
+
+  if (reported <= 0) {
+    debugln("onCwx_wpm: invalid (<=0) -> ignore");
+    return;
+  }
+
+  // Not gated on TX mode: cwx.wpm is the radio's keyer speed in every mode.
   // Signal main loop to adopt/sync WPM through the single authoritative path.
   // This ensures Keyer_Apply_Wpm() runs, which updates engine/UI and notifies WK host.
   GotSpeedParm = true;
-  debugln("onTransmit_speed: flagged GotSpeedParm");
+  debugln("onCwx_wpm: flagged GotSpeedParm");
 }
 
 

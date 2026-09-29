@@ -1150,6 +1150,11 @@ FLASHMEM void FlexRig::connect()
     connected = true;
     debugln("Connected");
 
+    // Forget the previous session's CW speed so the radio's first
+    // 'cwx wpm=' on this connection always raises a wpm event.
+    cwx.wpm = -1;
+    cwx.upd_wpm = false;
+
     // Drain early server banners without a hard 1s sleep.
     uint32_t t0   = millis();
     uint32_t idle = 0;
@@ -1583,6 +1588,7 @@ FLASHMEM  void FlexRig::configureClient()
   commandList.add(F("sub client all"));
   commandList.add(F("sub radio all"));
   commandList.add(F("sub tx all"));
+  commandList.add(F("sub cwx all"));   // CW speed is reported as 'cwx wpm='
   commandList.add(F("sub atu all"));
   commandList.add(F("sub meter all"));
   commandList.add(F("sub pan all"));
@@ -2792,7 +2798,9 @@ FLASHMEM void FlexRig::setCwSpeed(int value)
   char cmd[30];
   sprintf(cmd, "cw wpm %d", value);
   addToCommandList(cmd);
-  transmit.set_speed(value);
+  // No local write: the radio reports the new speed as 'cwx wpm=', which
+  // updates cwx.wpm. Writing transmit.speed here made the radio's next
+  // 'transmit speed=' line look like a change and restored a stale value.
 }
 
 FLASHMEM void FlexRig::setCwPitch(int value)

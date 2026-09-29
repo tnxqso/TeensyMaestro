@@ -39,7 +39,7 @@ extern char    gFixedEndpointLabel[64];
 extern int ClientMenuItem;
 extern int TXSlice;
 extern int  CWVal;  // needed for unchanged check
-extern void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline);
+extern void Keyer_Apply_Wpm(int newWpm, bool preserveBaseline, bool fromRadio);
 extern volatile bool g_KeyerTimingActive;
 
 // Headless state helper (declared elsewhere in the sketch)
@@ -58,9 +58,28 @@ void TMU_MarkAdoptedRadioWpm() {
 
 static constexpr uint32_t LOCAL_WPM_HOLDOFF_MS = 600;
 static uint32_t s_localWpmSetMs = 0;
+static int      s_lastSentWpm   = TMU_WPM_UNKNOWN;
 
 void TMU_MarkLocalWpmSet() {
   s_localWpmSetMs = millis();
+}
+
+bool TMU_LocalWpmHoldoffActive() {
+  return s_localWpmSetMs != 0 &&
+         (int32_t)(millis() - s_localWpmSetMs) < (int32_t)LOCAL_WPM_HOLDOFF_MS;
+}
+
+int TMU_LastSentCwWpm() {
+  return s_lastSentWpm;
+}
+
+void TMU_NoteCwWpmSent(int wpm) {
+  s_lastSentWpm = wpm;
+}
+
+void TMU_ResetCwWpmSyncState() {
+  s_lastSentWpm   = TMU_WPM_UNKNOWN;
+  s_localWpmSetMs = 0;
 }
 
 // -----------------------------------------------------------------------------
@@ -178,57 +197,46 @@ void TMU_LogCwSyncSnapshot(const char* tag) {
 
 // Single source of truth for radio WPM
 int TMU_GetReportedCwWpm() {
-  // If not connected, we cannot fetch from radio → return current local CWVal.
+  // If not connected, there is no radio value.
   if (!fRig.connected) {
   #if DEBUG_WPM && DEBUG_WPM_GETTER_VERBOSE
-    DLOG_WPM("[WPM] rig not connected → returning CWVal=%d\n", CWVal);
+    DLOG_WPM("[WPM] rig not connected → unknown\n");
   #endif
-    return TMU_ClampWpm(CWVal);
+    return TMU_WPM_UNKNOWN;
   }
 
-  /* 
-     NOTE: CWX check disabled. 
-     We rely on transmit.speed as the authoritative source for the physical knob.
-     Prioritizing CWX here previously masked the real issue in transmit.speed.
-  */
   /*
-  if (fRig.cwx.wpm > 0) {
-    const int w = TMU_ClampWpm(fRig.cwx.wpm);
-  #if DEBUG_WPM && DEBUG_WPM_GETTER_VERBOSE
-    DLOG_WPM("[WPM] CWX.wpm=%d → %d\n", fRig.cwx.wpm, w);
-  #endif
-    return w;
-  }
+     NOTE: cwx.wpm is the only radio source for CW speed.
+     transmit.speed is not used: on some radios it stays frozen (for example
+     at 30) while 'cwx wpm=' follows every speed change from any client.
   */
-
-  String mode;
-  if (TMU_TxModeKnown(mode) && TMU_TxIsCw() && fRig.transmit.speed > 0) {
-    const int w = TMU_ClampWpm(fRig.transmit.speed);
-
-    // --- BUG FIX: The 5 WPM Profile Glitch ---
-    // The FlexRadio firmware temporarily reports 'speed=5' (factory default)
-    // inside the transmit status message during a Global Profile load.
-    // SOLUTION: If the radio reports exactly 5 WPM, but our local knob 
-    // is set to something else, we treat the 5 as a transient glitch and ignore it.
-    if (w == 5 && CWVal != 5) {
-    #if DEBUG_WPM && DEBUG_WPM_GETTER_VERBOSE
-       DLOG_WPM("[WPM] IGNORED glitch 5 WPM from radio. Keeping local %d.\n", CWVal);
-    #endif
-       return TMU_ClampWpm(CWVal);
-    }
-    // -----------------------------------------
-
+  if (fRig.cwx.wpm <= 0) {
   #if DEBUG_WPM && DEBUG_WPM_GETTER_VERBOSE
-    DLOG_WPM("[WPM] Fallback tx.speed=%d → %d (mode=%s)\n",
-             fRig.transmit.speed, w, mode.c_str());
+    DLOG_WPM("[WPM] cwx.wpm=%d not valid → unknown\n", fRig.cwx.wpm);
   #endif
-    return w;
+    return TMU_WPM_UNKNOWN;
   }
+
+  const int w = TMU_ClampWpm(fRig.cwx.wpm);
+
+  // --- BUG FIX: The 5 WPM Profile Glitch ---
+  // The FlexRadio firmware temporarily reports 'speed=5' (factory default)
+  // inside the transmit status message during a Global Profile load.
+  // The same filter is applied to 'cwx wpm=' in case it shows the same glitch.
+  // SOLUTION: If the radio reports exactly 5 WPM, but our local knob
+  // is set to something else, we treat the 5 as a transient glitch and ignore it.
+  if (w == 5 && CWVal != 5) {
+  #if DEBUG_WPM && DEBUG_WPM_GETTER_VERBOSE
+     DLOG_WPM("[WPM] IGNORED glitch 5 WPM from radio. Keeping local %d.\n", CWVal);
+  #endif
+     return TMU_WPM_UNKNOWN;
+  }
+  // -----------------------------------------
 
 #if DEBUG_WPM && DEBUG_WPM_GETTER_VERBOSE
-  DLOG_WPM("[WPM] no valid radio value → returning CWVal=%d\n", CWVal);
+  DLOG_WPM("[WPM] cwx.wpm=%d → %d\n", fRig.cwx.wpm, w);
 #endif
-  return TMU_ClampWpm(CWVal);
+  return w;
 }
 
 bool TMU_AdoptCwWpmIfValid(bool onlyWhenCwMode,
@@ -254,6 +262,10 @@ bool TMU_AdoptCwWpmIfValid(bool onlyWhenCwMode,
   }
 
   const int chosen = TMU_GetReportedCwWpm();
+  if (chosen == TMU_WPM_UNKNOWN) {
+    DLOG_WPM("[WPM] skip adopt: no valid radio value\n");
+    return false;
+  }
   if (chosen == CWVal) {
   #if !DEBUG_WPM_CHANGES_ONLY
     DLOG_WPM("[WPM] adopt: unchanged (%d) → no-op\n", chosen);
@@ -261,7 +273,8 @@ bool TMU_AdoptCwWpmIfValid(bool onlyWhenCwMode,
     return false;
   }
 
-  Keyer_Apply_Wpm(chosen, preserveBaseline);
+  Keyer_Apply_Wpm(chosen, preserveBaseline, /*fromRadio=*/true);
+  TMU_NoteCwWpmSent(TMU_WPM_UNKNOWN);
   if (outAppliedWpm) *outAppliedWpm = chosen;
   DLOG_WPM("[WPM] adopt: applied=%d preserveBaseline=%d\n",
            chosen, preserveBaseline ? 1 : 0);
@@ -279,8 +292,7 @@ bool TMU_SyncCwWpm(bool preserveBaseline,
     return false;
   }
 
-  if (s_localWpmSetMs != 0 &&
-      (int32_t)(millis() - s_localWpmSetMs) < (int32_t)LOCAL_WPM_HOLDOFF_MS) {
+  if (TMU_LocalWpmHoldoffActive()) {
     DLOG_WPM("[WPM] sync skip: local holdoff active (%lums remaining)\n",
              (unsigned long)(LOCAL_WPM_HOLDOFF_MS -
                              (uint32_t)(millis() - s_localWpmSetMs)));
@@ -293,6 +305,11 @@ bool TMU_SyncCwWpm(bool preserveBaseline,
   // Single source of truth for fetching radio WPM.
   const int reported = TMU_GetReportedCwWpm();
 
+  if (reported == TMU_WPM_UNKNOWN) {
+    DLOG_WPM("[WPM] sync skip: no valid radio value\n");
+    return false;
+  }
+
   // Debounce: nothing to do if no change.
   if (reported == CWVal) {
   #if !DEBUG_WPM_CHANGES_ONLY
@@ -302,7 +319,10 @@ bool TMU_SyncCwWpm(bool preserveBaseline,
   }
 
   // Apply to keyer (updates CWVal/WPM/ElementLen/enc+display)
-  Keyer_Apply_Wpm(reported, preserveBaseline);
+  Keyer_Apply_Wpm(reported, preserveBaseline, /*fromRadio=*/true);
+  // The radio now holds a value TM CE did not send. Forget the last sent
+  // value so the next encoder change is always sent.
+  TMU_NoteCwWpmSent(TMU_WPM_UNKNOWN);
   if (outAppliedWpm) *outAppliedWpm = reported;
 
   DLOG_WPM("[WPM] sync applied=%d preserveBaseline=%d\n",

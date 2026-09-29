@@ -24,7 +24,9 @@ Cwx::Cwx() {
 		mInfoElem[i].to=0;
 	}
 
-	upd_wpm=true;
+	// -1 marks "unknown" until the radio sends 'cwx wpm='. No initial event.
+	wpm=-1;
+	upd_wpm=false;
 	upd_break_in_delay=true;
 	upd_macro1=true;
 	upd_macro2=true;
